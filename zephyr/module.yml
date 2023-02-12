@@ -1,0 +1,5 @@
+name: xenlib
+build:
+  cmake: .
+  kconfig: Kconfig
+
