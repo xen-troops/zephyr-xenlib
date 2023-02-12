@@ -1,0 +1,21 @@
+# Copyright (c) 2019 Peter Bigot Consulting, LLC
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "Xen Libraries"
+
+config XEN_STORE_SRV
+	bool "Enable XenStore server"
+	help
+	  Enable xenstore server library. It should be included
+	  if you are running Zephyr as Dom0.
+
+config XEN_DOMAIN_MANAGEMENT
+	bool "Enable Xen Domain Management"
+	help
+	  Enable domain management library. This library allows you
+	  to create, destroy and manage xen domains.
+
+config XEN_SHELL
+	bool "Enable Xen shell commands"
+	help
+	  Enable set of Xen shell commands for domain management.
