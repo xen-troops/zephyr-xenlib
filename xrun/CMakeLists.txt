@@ -8,7 +8,7 @@ add_library(XRUN INTERFACE)
 target_include_directories(XRUN INTERFACE include)
 
 zephyr_library()
-zephyr_library_sources(src/storage.c)
+zephyr_library_sources(src/xrun.c src/storage.c)
 zephyr_library_link_libraries(XRUN)
 zephyr_include_directories(include)
 zephyr_library_include_directories_ifdef(
