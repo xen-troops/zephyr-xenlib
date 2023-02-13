@@ -51,6 +51,20 @@ config XEN_VCH
 	help
 	  Enable vchannel communication library.
 
+config XRUN
+	bool "Enable XRUN support"
+	select JSON_LIBRARY
+	help
+	  Enable xrun support which allows to run domains based on the runtime spec.
+
+config XRUN_JSON_SIZE_MAX
+	int "Maximum size of the json cni spec"
+	default 8192
+	depends on XRUN
+	help
+	  Sets the maximum size of the cni spec json that could
+	  be passed to xrun call.
+
 config XRUN_MAX_PATH_SIZE
 	int "Maximum length of file path to read from storage"
 	default 255
