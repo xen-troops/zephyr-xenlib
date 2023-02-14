@@ -78,7 +78,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	int rc;
 
 	/* TODO: Alloc all required evtchns */
-	rc = alloc_unbound_event_channel(domain->domid);
+	rc = alloc_unbound_event_channel_dom0(domain->domid, 0);
 	if (rc < 0) {
 		printk("failed to alloc evtchn for domain #%d xenstore, rc = %d\n", domain->domid,
 		       rc);
@@ -89,7 +89,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	printk("Generated remote_domid=%d, xenstore_evtchn=%d\n", domain->domid,
 	       domain->xenstore_evtchn);
 
-	rc = alloc_unbound_event_channel(domain->domid);
+	rc = alloc_unbound_event_channel_dom0(domain->domid, 0);
 	if (rc < 0) {
 		printk("failed to alloc evtchn for domain #%d console, rc = %d\n", domain->domid,
 		       rc);

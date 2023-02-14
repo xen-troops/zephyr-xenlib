@@ -88,9 +88,13 @@ int init_domain_console(struct xen_domain *domain)
 {
 	int rc = 0;
 
-	domain->local_console_evtchn =
-		bind_interdomain_event_channel(domain->domid, domain->console_evtchn,
+	rc = bind_interdomain_event_channel(domain->domid, domain->console_evtchn,
 					       evtchn_callback, domain);
+
+	if (rc < 0)
+		return rc;
+
+	domain->local_console_evtchn = rc;
 
 	k_sem_init(&domain->console_sem, 1, 1);
 
@@ -103,8 +107,6 @@ int init_domain_console(struct xen_domain *domain)
 		printk("Failed to set domain console evtchn param, rc= %d\n", rc);
 		return rc;
 	}
-
-	rc = bind_event_channel(domain->local_console_evtchn, evtchn_callback, domain);
 
 	return rc;
 }
