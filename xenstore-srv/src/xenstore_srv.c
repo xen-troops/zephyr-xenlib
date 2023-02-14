@@ -683,10 +683,15 @@ int start_domain_stored(struct xen_domain *domain)
 	int rc = 0;
 
 	k_sem_init(&domain->xb_sem, 0, 1);
-	domain->local_xenstore_evtchn = bind_interdomain_event_channel(domain->domid,
+	rc = bind_interdomain_event_channel(domain->domid,
 								       domain->xenstore_evtchn,
 								       xs_evtchn_cb,
 								       (void *)domain);
+
+	if (rc < 0)
+		return rc;
+
+	domain->local_xenstore_evtchn = rc;
 
 	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
 	if (rc) {
