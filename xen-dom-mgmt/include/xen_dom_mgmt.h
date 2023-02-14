@@ -7,13 +7,13 @@
 #ifndef XENLIB_XEN_DOM_MGMT_H
 #define XENLIB_XEN_DOM_MGMT_H
 
-/* TODO: remove this include (see below) */
-#include <zephyr/shell/shell.h>
+#include <domain.h>
 
-/* TODO: Rework interface. dom_mgmt lib should not export shell functions */
-int domu_create(const struct shell *shell, size_t argc, char **argv);
-int domu_destroy(const struct shell *shell, size_t argc, char **argv);
-int domu_pause(const struct shell *shell, size_t argc, char **argv);
-int domu_unpause(const struct shell *shell, size_t argc, char **argv);
+int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid);
+int domain_destroy(uint32_t domid);
+int domain_pause(uint32_t domid);
+int domain_unpause(uint32_t domid);
+int domain_console_start(uint32_t domid);
+int domain_console_stop(uint32_t domid);
 
 #endif
