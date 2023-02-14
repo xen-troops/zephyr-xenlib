@@ -20,7 +20,6 @@
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
-#include <zephyr/shell/shell.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -179,10 +178,6 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_
 	return 0;
 }
 
-extern char __img_domd_start[];
-extern char __img_domd_end[];
-extern char __img_domu_start[];
-extern char __img_domu_end[];
 uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, const char *img_end)
 {
 	int i, rc;
@@ -204,7 +199,7 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 
 	if (mapped_domd == NULL)
 	{
-		return NULL;
+		return 0;
 	}
 
 	printk("Allocated %ld pages (%ld), mapped_domd=%p\n", nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
@@ -251,10 +246,6 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	return base_addr + zhdr->text_offset;
 }
 
-/*extern char __dtb_domu_start[];
-extern char __dtb_domu_end[];*/
-extern char __dtb_domd_start[];
-extern char __dtb_domd_end[];
 void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
 {
 	int i, rc;
@@ -444,39 +435,13 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 	return NULL;
 }
 
-uint32_t parse_domid(size_t argc, char **argv)
+int domain_console_start(uint32_t domid)
 {
-	/* first would be the cmd name, start from second */
-	int pos = 1;
-
-	if (argv[pos][0] == '-' && argv[pos][1] == 'd') {
-		/* Take next value after "-d" option */
-		pos++;
-		return atoi(argv[pos]);
-	}
-
-	/* Use zero as invalid value */
-	return 0;
-}
-
-int domu_console_start(const struct shell *shell, size_t argc, char **argv)
-{
-	uint32_t domid = 0;
 	struct xen_domain *domain;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
-		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
@@ -484,24 +449,13 @@ int domu_console_start(const struct shell *shell, size_t argc, char **argv)
 	return start_domain_console(domain);
 }
 
-int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
+int domain_console_stop(uint32_t domid)
 {
-	uint32_t domid = 0;
 	struct xen_domain *domain;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
-		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
@@ -581,11 +535,9 @@ void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, co
 }
 
 #define LOAD_ADDR_OFFSET 0x80000
-int domu_create(const struct shell *shell, size_t argc, char **argv)
+int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 {
-	/* TODO: pass mem, domid etc. as parameters */
 	int rc = 0;
-	uint32_t domid = 0;
 	struct xen_domctl_createdomain config;
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domctl_scheduler_op sched_op;
@@ -595,29 +547,14 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	uint64_t dtb_addr = GUEST_RAM0_BASE;
 	uint64_t ventry;
 	struct xen_domain *domain;
-	struct xen_domain_cfg *domcfg;
 	char *domdtdevs;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
 
 	if (dom_num >= DOM_MAX) {
 		printk("Runtime exceeds maximum number of domains\n");
 		return -EINVAL;
 	}
 
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		printk("Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
-
-	/*domcfg = (domid == DOMID_DOMD) ? &domd_cfg : &domu_cfg;
-	domdtdevs = (domid == DOMID_DOMD) ? domd_dtdevs : domu_dtdevs;*/
-
-	domcfg = &domd_cfg;
-	domdtdevs = domd_cfg.dtdevs;
+	domdtdevs = domcfg->dtdevs;
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
@@ -654,13 +591,9 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	rc = prepare_domu_physmap(domid, base_pfn, domcfg);
 
-	if (domid == DOMID_DOMD) {
-		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domd_start, __img_domd_end);
-		load_domd_dtb(domid, dtb_addr, __dtb_domd_start, __dtb_domd_end);
-	} /*else {
-		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domu_start, __img_domu_end);
-		load_domd_dtb(domid, dtb_addr, __dtb_domu_start, __dtb_domu_end);
-	}*/
+	ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, domcfg->img_start,
+							 domcfg->img_end);
+	load_domd_dtb(domid, dtb_addr, domcfg->dtb_start, domcfg->dtb_end);
 
 	if (ventry == NULL)
 	{
@@ -769,25 +702,14 @@ void unmap_domain_ring(void *p)
 	k_free(p);
 }
 
-int domu_destroy(const struct shell *shell, size_t argc, char **argv)
+int domain_destroy(uint32_t domid)
 {
 	int rc;
-	uint32_t domid = 0;
 	struct xen_domain *domain = NULL;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to destroy cmd\n");
-		return -EINVAL;
-	}
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
-		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
@@ -800,7 +722,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	unmap_domain_ring(domain->domint);
 
 	rc = xen_domctl_destroydomain(domid);
-	shell_print(shell, "Return code = %d XEN_DOMCTL_destroydomain\n", rc);
+	printk("Return code = %d XEN_DOMCTL_destroydomain\n", rc);
 
 	k_mutex_lock(&dl_mutex, K_FOREVER);
 	sys_dlist_remove(&domain->node);
@@ -813,25 +735,14 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return rc;
 }
 
-int domu_pause(const struct shell *shell, size_t argc, char **argv)
+int domain_pause(uint32_t domid)
 {
 	int rc;
-	uint32_t domid = 0;
 	struct xen_domain *domain = NULL;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to destroy cmd\n");
-		return -EINVAL;
-	}
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
-		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
@@ -841,32 +752,16 @@ int domu_pause(const struct shell *shell, size_t argc, char **argv)
 	return rc;
 }
 
-int domu_unpause(const struct shell *shell, size_t argc, char **argv)
+int domain_unpause(uint32_t domid)
 {
-	int rc;
-	uint32_t domid = 0;
 	struct xen_domain *domain = NULL;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to unpause cmd\n");
-		return -EINVAL;
-	}
-
-	shell_print(shell, "domid=%d\n", domid);
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
-		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
 
-	rc = xen_domctl_unpausedomain(domid);
-
-	return rc;
+	return xen_domctl_unpausedomain(domid);
 }
