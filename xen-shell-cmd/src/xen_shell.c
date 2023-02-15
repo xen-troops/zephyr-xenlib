@@ -71,8 +71,9 @@ void console_read_thrd(void *dom, void *p2, void *p3)
 					      sizeof(buffer) - nlpos - 1);
 			if (recv) {
 				memcpy(out, buffer, recv);
-				// disable temporary
-				//				printk("%s", buffer);
+
+				/* Transfer output to Zephyr Dom0 console */
+				printk("%s", buffer);
 			}
 		} while (recv);
 	}
