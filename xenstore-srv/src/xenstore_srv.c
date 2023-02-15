@@ -15,6 +15,7 @@
 
 #include "domain.h"
 #include "xenstore_srv.h"
+#include "xss.h"
 
 #define XENSTORE_STACK_SIZE_PER_DOM (32 * 1024)
 K_KERNEL_STACK_DEFINE(xenstore_thrd_stack, XENSTORE_STACK_SIZE_PER_DOM *DOM_MAX);
@@ -50,7 +51,7 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 	return NULL;
 }
 
-struct xs_entry *key_to_entry(char *key)
+struct xs_entry *key_to_entry(const char *key)
 {
 	static const char rootdir[] = "/";
 
@@ -267,7 +268,7 @@ int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 	return 1;
 }
 
-void xss_do_write(char *const_path, char *data)
+void xss_do_write(const char *const_path, const char *data)
 {
 	struct xs_entry *iter = NULL;
 	char *path;
@@ -315,6 +316,45 @@ void xss_do_write(char *const_path, char *data)
 	}
 
 	k_mutex_unlock(&xsel_mutex);
+}
+
+int xss_write(const char *path, const char *value)
+{
+	xss_do_write(path, value);
+	return 0;
+}
+
+int xss_read(const char *path, char *value, size_t len)
+{
+	int rc = -ENOENT;
+	struct xs_entry *entry;
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+
+	enitry = key_to_entry(path);
+	if (entry) {
+		strncpy(value, entry->value, len);
+		rc = 0;
+	}
+
+	k_mutex_unlock(&xsel_mutex);
+	return rc;
+}
+
+int xss_read_integer(const char *path, int *value)
+{
+	int rc;
+	char ns[32] = { 0 };
+
+	rc = xss_read(path, ns, sizeof(ns));
+	if (!rc)
+		*value = atoi(ns);
+	return rc;
+}
+
+int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
+{
+	return 0;
 }
 
 //TODO: header, moveto dom0.c
