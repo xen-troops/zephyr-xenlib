@@ -534,7 +534,80 @@ void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, co
 	xss_do_write(lbuffer, "pvh");
 }
 
-#define LOAD_ADDR_OFFSET 0x80000
+static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
+							 uint64_t kernbase, uint64_t kernsize,
+							 uint64_t dtbsize)
+{
+	const uint64_t dtb_len = ROUND_UP(dtbsize, MB(2));
+	const uint64_t ramend = rambase + ramsize;
+	const uint64_t ram128mb = rambase + MB(128);
+	const uint64_t kernsize_aligned = ROUND_UP(kernsize, MB(2));
+	const uint64_t kernend = kernbase + kernsize;
+	const uint64_t modsize = dtb_len;
+	uint64_t modbase;
+
+	printf("rambase = %lld, ramsize= %lld\n", rambase, ramsize);
+	printf("kernbase = %lld kernsize = %lld, dtbsize= %lld\n",
+		   kernbase, kernsize, dtbsize);
+	printf("kernsize_aligned = %lld\n", kernsize_aligned);
+
+	if (modsize + kernsize_aligned > ramsize) {
+		printf("Not enough memory in the first bank for the kernel+dtb+initrd\n");
+		return 0;
+	}
+
+	/*
+	 * Comment was taken from XEN source code from function
+	 * place_modules (xen/arch/arm/kernel.c) and added here for the
+	 * better understanding why this algorithm was used.
+	 * DTB must be loaded such that it does not conflict with the
+	 * kernel decompressor. For 32-bit Linux Documentation/arm/Booting
+	 * recommends just after the 128MB boundary while for 64-bit Linux
+	 * the recommendation in Documentation/arm64/booting.txt is below
+	 * 512MB.
+	 *
+	 * If the bootloader provides an initrd, it will be loaded just
+	 * after the DTB.
+	 *
+	 * We try to place dtb+initrd at 128MB or if we have less RAM
+	 * as high as possible. If there is no space then fallback to
+	 * just before the kernel.
+	 *
+	 * If changing this then consider
+	 * tools/libxc/xc_dom_arm.c:arch_setup_meminit as well.
+	 */
+
+	/*
+	 * According to the Linux Documentation/arm64/booting.rst Header notes:
+	 * Decompressed kernel image has Bit 3 in kernel flags:
+	 * Bit 3		Kernel physical placement
+	 *
+	 *  0
+	 *     2MB aligned base should be as close as possible
+	 *     to the base of DRAM, since memory below it is not
+	 *     accessible via the linear mapping
+	 *  1
+	 *     2MB aligned base may be anywhere in physical
+	 *     memory
+	 * When Bit 3 was set to 0 - then the memory below kernel base address
+	 * is not accessible by the kernel. That's why dtb should be placed
+	 * somewhere after kernel base address.
+	 */
+
+	if (ramend >= ram128mb + modsize && kernend < ram128mb)
+		modbase = ram128mb;
+	else if (ramend - modsize > kernsize_aligned)
+		modbase = ramend - modsize;
+	else if (kernbase - rambase > modsize)
+		modbase = kernbase - modsize;
+	else {
+		printf("Unable to find suitable location for dtb+initrd\n");
+		return 0;
+	}
+
+	return modbase;
+};
+
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 {
 	int rc = 0;
@@ -543,8 +616,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	struct xen_domctl_scheduler_op sched_op;
 	uint64_t base_addr = GUEST_RAM0_BASE;
 	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
-	/* TODO: make it not hardcoded */
-	uint64_t dtb_addr = GUEST_RAM0_BASE;
+	uint64_t dtb_addr;
 	uint64_t ventry;
 	struct xen_domain *domain;
 	char *domdtdevs;
@@ -553,6 +625,12 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		printk("Runtime exceeds maximum number of domains\n");
 		return -EINVAL;
 	}
+
+	dtb_addr = get_dtb_addr(base_addr, domcfg->mem_kb * 1024,
+				 base_addr, domcfg->img_end - domcfg->img_start,
+				 domcfg->dtb_end - domcfg->dtb_start);
+	if (!dtb_addr)
+		return -ENOMEM;
 
 	domdtdevs = domcfg->dtdevs;
 
@@ -591,7 +669,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 
 	rc = prepare_domu_physmap(domid, base_pfn, domcfg);
 
-	ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, domcfg->img_start,
+	ventry = load_domd_image(domid, base_addr, domcfg->img_start,
 							 domcfg->img_end);
 	load_domd_dtb(domid, dtb_addr, domcfg->dtb_start, domcfg->dtb_end);
 
