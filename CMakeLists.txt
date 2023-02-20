@@ -6,3 +6,4 @@
 add_subdirectory_ifdef(CONFIG_XEN_STORE_SRV xenstore-srv)
 add_subdirectory_ifdef(CONFIG_XEN_DOMAIN_MANAGEMENT xen-dom-mgmt)
 add_subdirectory_ifdef(CONFIG_XEN_SHELL xen-shell-cmd)
+add_subdirectory_ifdef(CONFIG_XEN_VCH vch)
