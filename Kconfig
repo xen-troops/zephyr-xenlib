@@ -19,3 +19,8 @@ config XEN_SHELL
 	bool "Enable Xen shell commands"
 	help
 	  Enable set of Xen shell commands for domain management.
+
+config XEN_VCH
+	bool "Enable Xen vchannels support"
+	help
+	  Enable vchannel communication library.
