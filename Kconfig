@@ -46,6 +46,11 @@ config XEN_SHELL
 	help
 	  Enable set of Xen shell commands for domain management.
 
+config XRUN_SHELL_CMDS
+	bool "Enable XRUN shell commands"
+	help
+	  Enable set of XRUN shell commands to manage xrun library calls.
+
 config XEN_VCH
 	bool "Enable Xen vchannels support"
 	help
