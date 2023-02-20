@@ -54,6 +54,12 @@ config XEN_VCH
 	help
 	  Enable vchannel communication library.
 
+config VCH_PATH_MAXLEN
+	int "Maximum length of vchannel ID to read from XenStore"
+	default 32
+	help
+	  The maximum XenStore path size that identify a separate vchannel.
+
 config XRUN
 	bool "Enable XRUN support"
 	select JSON_LIBRARY

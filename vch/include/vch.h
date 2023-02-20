@@ -7,6 +7,8 @@
 
 #pragma once
 #include <zephyr/xen/generic.h>
+#include <zephyr/xen/public/event_channel.h>
+#include <zephyr/xen/public/grant_table.h>
 #include <zephyr/xen/public/xen.h>
 #include <zephyr/xen/public/io/libxenvchan.h>
 
@@ -15,14 +17,19 @@ extern "C" {
 #endif
 
 struct vch_handle {
-	int evtch;
+	evtchn_port_t evtch;
+	grant_ref_t gref;
+	bool blocking;
+	struct k_sem sem;
+	bool is_server;
 	struct vchan_interface *ring;
 	struct ring_shared *write;
-	void *write_cbuf;
+	uint8_t *write_cbuf;
 	unsigned int write_ord;
 	struct ring_shared *read;
 	unsigned int read_ord;
-	void *read_cbuf;
+	uint8_t *read_cbuf;
+	char path[CONFIG_VCH_PATH_MAXLEN];
 };
 
 /**
