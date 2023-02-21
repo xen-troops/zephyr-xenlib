@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "domain.h"
+#include "xen-dom-fdt.h"
 
 #include <xenstore_srv.h>
 #include <xen_shell.h>
@@ -43,6 +44,15 @@ struct modules_address {
 static int dom_num = 0;
 
 #define DOMID_DOMD 1
+
+/* Define major and minor versions if was not provided */
+#ifndef XEN_VERSION_MAJOR
+#define XEN_VERSION_MAJOR 4
+#endif
+
+#ifndef XEN_VERSION_MINOR
+#define XEN_VERSION_MINOR 16
+#endif
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 K_MUTEX_DEFINE(dl_mutex);
@@ -337,6 +347,9 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	xen_pfn_t mapped_pfns[nr_pages];
 	xen_pfn_t indexes[nr_pages];
 	int err_codes[nr_pages];
+	char *fdt;
+	size_t fdt_size;
+
 	struct xen_domctl_cacheflush cacheflush;
 
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
@@ -345,20 +358,30 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 		   "base_addr = %llx, pages = %lld (size = %lld)\n",
 		   zhdr->text_offset, base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
 
-	dtb_addr = get_dtb_addr(base_addr, domcfg->mem_kb * 1024, base_addr,
-							domcfg->img_end - domcfg->img_start,
-							domcfg->dtb_end - domcfg->dtb_start);
-	if (!dtb_addr)
-		return -ENOMEM;
+	rc = gen_domain_fdt(domcfg, (void **)&fdt, &fdt_size,
+			   XEN_VERSION_MAJOR, XEN_VERSION_MINOR,
+			   (void *)domcfg->dtb_start,
+			   domcfg->dtb_end - domcfg->dtb_start, domid);
+	if (rc || fdt_size == 0) {
+		printk("Error generating domain fdt: %d\n", rc);
+		return (rc) ? rc : -ENOMEM;
+	}
+
+	dtb_addr = get_dtb_addr(base_addr, KB(domcfg->mem_kb), base_addr,
+				 domcfg->img_end - domcfg->img_start, fdt_size);
+	if (!dtb_addr) {
+		goto out_dtb;
+	}
 
 	modules->dtb_addr = dtb_addr;
 
-	load_dtb(domid, dtb_addr, domcfg->dtb_start, domcfg->dtb_end);
+	load_dtb(domid, dtb_addr, fdt, fdt + fdt_size);
 
 	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 
-	if (mapped_domd == NULL)
-		return 0;
+	if (mapped_domd == NULL) {
+		goto out_dtb;
+	}
 
 	printk("Allocated %ld pages (%ld), mapped_domd=%p\n",
 		   nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
@@ -411,6 +434,8 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	rc = 0;
  out:
 	k_free(mapped_domd);
+ out_dtb:
+	free_domain_fdt(fdt);
 
 	return rc;
 }
