@@ -17,6 +17,13 @@ config XEN_LIBFDT
 	  Domain config. It provides complete toolset to work with
 	  flattened device tree.
 
+config PARTIAL_DEVICE_TREE_SIZE
+	int "Domain device tree size"
+	default 8192
+	depends on XEN_LIBFDT
+	help
+	  Maximum size of the domain device tree
+
 config XEN_DOMAIN_MANAGEMENT
 	bool "Enable Xen Domain Management"
 	help
