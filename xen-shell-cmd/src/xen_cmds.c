@@ -5,7 +5,127 @@
  */
 
 #include <zephyr/shell/shell.h>
-#include <xen_shell.h>
+#include <stdlib.h>
+
+#include <xen_dom_mgmt.h>
+
+extern struct xen_domain_cfg domd_cfg;
+
+uint32_t parse_domid(size_t argc, char **argv)
+{
+	/* first would be the cmd name, start from second */
+	int pos = 1;
+
+	if (argv[pos][0] == '-' && argv[pos][1] == 'd') {
+		/* Take next value after "-d" option */
+		pos++;
+		return atoi(argv[pos]);
+	}
+
+	/* Use zero as invalid value */
+	return 0;
+}
+
+static int domu_create(const struct shell *shell, int argc, char **argv)
+{
+	uint32_t domid;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		printk("Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+	/*
+	 * TODO: this should be changed in app code.
+	 * Not all domains using domd config
+	 */
+	return domain_create(&domd_cfg, domid);
+}
+
+int domu_destroy(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to destroy cmd\n");
+		return -EINVAL;
+	}
+
+	return domain_destroy(domid);
+}
+
+int domu_console_start(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
+	return domain_console_stop(domid);
+}
+
+int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
+	return domain_console_stop(domid);
+}
+
+int domu_pause(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to destroy cmd\n");
+		return -EINVAL;
+	}
+
+	return domain_pause(domid);
+}
+
+int domu_unpause(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to unpause cmd\n");
+		return -EINVAL;
+	}
+
+	shell_print(shell, "domid=%d\n", domid);
+
+	return domain_unpause(domid);
+}
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
