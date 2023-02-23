@@ -331,7 +331,7 @@ int xss_read(const char *path, char *value, size_t len)
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 
-	enitry = key_to_entry(path);
+	entry = key_to_entry(path);
 	if (entry) {
 		strncpy(value, entry->value, len);
 		rc = 0;
