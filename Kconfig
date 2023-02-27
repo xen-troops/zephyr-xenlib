@@ -9,6 +9,14 @@ config XEN_STORE_SRV
 	  Enable xenstore server library. It should be included
 	  if you are running Zephyr as Dom0.
 
+config XEN_LIBFDT
+	bool "Enable libfdt support"
+	help
+	  Enable libfdt module. This module allows you to generate
+	  Domain device tree based on the parameters set in the
+	  Domain config. It provides complete toolset to work with
+	  flattened device tree.
+
 config XEN_DOMAIN_MANAGEMENT
 	bool "Enable Xen Domain Management"
 	help
