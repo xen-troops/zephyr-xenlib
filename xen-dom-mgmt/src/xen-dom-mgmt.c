@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/dom0/zimage.h>
+#include <zephyr/xen/dom0/uimage.h>
 #include <zephyr/xen/generic.h>
 #include <zephyr/xen/hvm.h>
 #include <zephyr/xen/memory.h>
@@ -30,6 +32,11 @@
 #include <xen_shell.h>
 
 extern struct xen_domain_cfg domd_cfg;
+
+struct modules_address {
+  uint64_t ventry;
+  uint64_t dtb_addr;
+};
 
 /* Number of active domains, used as an indicator to not exhaust allocated stack area.
  * This variable used during shell command execution, thus requires no sync. */
@@ -159,7 +166,7 @@ static int allocate_magic_pages(int domid)
 #define EXTENT_2M_SIZE_KB 2048
 #define EXTENT_2M_PFN_SHIFT 9
 /* We need to populate magic pages and memory map here */
-static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_cfg *cfg)
+static int prepare_domain_physmap(int domid, uint64_t base_pfn, struct xen_domain_cfg *cfg)
 {
 	int i, rc;
 	uint64_t nr_mem_exts = ceiling_fraction(cfg->mem_kb, EXTENT_2M_SIZE_KB);
@@ -179,11 +186,152 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_
 	return 0;
 }
 
-uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, const char *img_end)
+static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
+							 uint64_t kernbase, uint64_t kernsize,
+							 uint64_t dtbsize)
+{
+	const uint64_t dtb_len = ROUND_UP(dtbsize, MB(2));
+	const uint64_t ramend = rambase + ramsize;
+	const uint64_t ram128mb = rambase + MB(128);
+	const uint64_t kernsize_aligned = ROUND_UP(kernsize, MB(2));
+	const uint64_t kernend = kernbase + kernsize;
+	const uint64_t modsize = dtb_len;
+	uint64_t modbase;
+
+	printf("rambase = %lld, ramsize= %lld\n", rambase, ramsize);
+	printf("kernbase = %lld kernsize = %lld, dtbsize= %lld\n",
+		   kernbase, kernsize, dtbsize);
+	printf("kernsize_aligned = %lld\n", kernsize_aligned);
+
+	if (modsize + kernsize_aligned > ramsize) {
+		printf("Not enough memory in the first bank for the kernel+dtb+initrd\n");
+		return 0;
+	}
+
+	/*
+	 * Comment was taken from XEN source code from function
+	 * place_modules (xen/arch/arm/kernel.c) and added here for the
+	 * better understanding why this algorithm was used.
+	 * DTB must be loaded such that it does not conflict with the
+	 * kernel decompressor. For 32-bit Linux Documentation/arm/Booting
+	 * recommends just after the 128MB boundary while for 64-bit Linux
+	 * the recommendation in Documentation/arm64/booting.txt is below
+	 * 512MB.
+	 *
+	 * If the bootloader provides an initrd, it will be loaded just
+	 * after the DTB.
+	 *
+	 * We try to place dtb+initrd at 128MB or if we have less RAM
+	 * as high as possible. If there is no space then fallback to
+	 * just before the kernel.
+	 *
+	 * If changing this then consider
+	 * tools/libxc/xc_dom_arm.c:arch_setup_meminit as well.
+	 */
+
+	/*
+	 * According to the Linux Documentation/arm64/booting.rst Header notes:
+	 * Decompressed kernel image has Bit 3 in kernel flags:
+	 * Bit 3		Kernel physical placement
+	 *
+	 *  0
+	 *     2MB aligned base should be as close as possible
+	 *     to the base of DRAM, since memory below it is not
+	 *     accessible via the linear mapping
+	 *  1
+	 *     2MB aligned base may be anywhere in physical
+	 *     memory
+	 * When Bit 3 was set to 0 - then the memory below kernel base address
+	 * is not accessible by the kernel. That's why dtb should be placed
+	 * somewhere after kernel base address.
+	 */
+
+	if (ramend >= ram128mb + modsize && kernend < ram128mb)
+		modbase = ram128mb;
+	else if (ramend - modsize > kernsize_aligned)
+		modbase = ramend - modsize;
+	else if (kernbase - rambase > modsize)
+		modbase = kernbase - modsize;
+	else {
+		printf("Unable to find suitable location for dtb+initrd\n");
+		return 0;
+	}
+
+	return modbase;
+};
+
+void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
+{
+	int i, rc;
+	void *mapped_dtb;
+	uint64_t mapped_dtb_pfn, dtb_pfn = XEN_PHYS_PFN(dtb_addr);
+	uint64_t dtb_size = dtb_end - dtb_start;
+	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
+	xen_pfn_t mapped_pfns[nr_pages];
+	xen_pfn_t indexes[nr_pages];
+	int err_codes[nr_pages];
+	struct xen_domctl_cacheflush cacheflush;
+
+	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	if (!mapped_dtb)
+		return;
+
+	mapped_dtb_pfn = xen_virt_to_gfn((uint64_t)mapped_dtb);
+
+	for (i = 0; i < nr_pages; i++) {
+		mapped_pfns[i] = mapped_dtb_pfn + i;
+		indexes[i] = dtb_pfn + i;
+	}
+
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
+					 indexes, mapped_pfns, err_codes);
+	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
+	if (rc < 0)
+		goto out;
+
+	printk("mapped_dtb = %p\n", mapped_dtb);
+	printk("Dtb start addr = %p, end addr = %p, binary size = 0x%llx\n", dtb_start,
+	       dtb_end, dtb_size);
+	printk("Dtb will be placed on addr = %p\n", (void *)dtb_addr);
+
+	/* Copy binary to domain pages and clear cache */
+	memcpy(mapped_dtb, dtb_start, dtb_size);
+
+	cacheflush.start_pfn = mapped_dtb_pfn;
+	cacheflush.nr_pfns = nr_pages;
+	rc = xen_domctl_cacheflush(0, &cacheflush);
+	printk("Return code for xen_domctl_cacheflush = %d\n", rc);
+
+	/* Needed to remove mapped DomU pages from Dom0 physmap */
+	for (i = 0; i < nr_pages; i++) {
+		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
+		if (rc < 0) {
+			printk("%d: xendom_remove_from_physmap rc = %d\n", __LINE__, rc);
+			goto out;
+		}
+	}
+
+	/*
+	 * After this Dom0 will have memory hole in mapped_domu address,
+	 * needed to populate memory on this address before freeing.
+	 */
+	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
+	if (rc < 0)
+		printk(">>> Return code = %d XENMEM_populate_physmap\n", rc);
+
+ out:
+	k_free(mapped_dtb);
+}
+
+int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
+				 struct xen_domain_cfg *domcfg, struct modules_address *modules)
 {
 	int i, rc;
 	void *mapped_domd;
 	uint64_t mapped_base_pfn;
+	uint64_t dtb_addr;
+	const char *img_start = domcfg->img_start + image_load_offset;
+	const char *img_end = domcfg->img_end;
 	uint64_t domd_size = img_end - img_start;
 	uint64_t nr_pages = ceiling_fraction(domd_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
@@ -193,17 +341,27 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
 	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
-	printk("Zimage header details: text_offset = %llx, base_addr = %llx, pages = %lld (size = %lld)\n", zhdr->text_offset,
-	       base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
+	printk("Zimage header details: text_offset = %llx,"
+		   "base_addr = %llx, pages = %lld (size = %lld)\n",
+		   zhdr->text_offset, base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
+
+	dtb_addr = get_dtb_addr(base_addr, domcfg->mem_kb * 1024, base_addr,
+							domcfg->img_end - domcfg->img_start,
+							domcfg->dtb_end - domcfg->dtb_start);
+	if (!dtb_addr)
+		return -ENOMEM;
+
+	modules->dtb_addr = dtb_addr;
+
+	load_dtb(domid, dtb_addr, domcfg->dtb_start, domcfg->dtb_end);
 
 	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 
 	if (mapped_domd == NULL)
-	{
 		return 0;
-	}
 
-	printk("Allocated %ld pages (%ld), mapped_domd=%p\n", nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
+	printk("Allocated %ld pages (%ld), mapped_domd=%p\n",
+		   nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
 	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
 	printk("cleaned %ld pages\n", nr_pages);
 	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
@@ -216,6 +374,9 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
 					 indexes, mapped_pfns, err_codes);
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
+	if (rc < 0)
+		goto out;
+
 	printk("mapped_domd = %p\n", mapped_domd);
 	printk("Zephyr DomD start addr = %p, end addr = %p, binary size = 0x%llx\n",
 	       img_start, img_end, domd_size);
@@ -232,6 +393,8 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	/* Needed to remove mapped DomU pages from Dom0 physmap */
 	for (i = 0; i < nr_pages; i++) {
 		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
+		if (rc < 0)
+			goto out;
 	}
 
 	/*
@@ -240,62 +403,72 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	 */
 	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
 	printk(">>> Return code = %d XENMEM_populate_physmap\n", rc);
-
-	k_free(mapped_domd);
+	if (rc < 0)
+		goto out;
 
 	/* .text start address in domU memory */
-	return base_addr + zhdr->text_offset;
+	modules->ventry = base_addr + zhdr->text_offset;
+	rc = 0;
+ out:
+	k_free(mapped_domd);
+
+	return rc;
 }
 
-void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
+
+int probe_uimage(int domid, struct xen_domain_cfg *domcfg,
+				 struct modules_address *modules)
 {
-	int i, rc;
-	void *mapped_dtb;
-	uint64_t mapped_dtb_pfn, dtb_pfn = XEN_PHYS_PFN(dtb_addr);
-	uint64_t dtb_size = dtb_end - dtb_start;
-	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
-	xen_pfn_t mapped_pfns[nr_pages];
-	xen_pfn_t indexes[nr_pages];
-	int err_codes[nr_pages];
-	struct xen_domctl_cacheflush cacheflush;
-
-	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	mapped_dtb_pfn = XEN_PHYS_PFN((uint64_t)mapped_dtb);
-
-	for (i = 0; i < nr_pages; i++) {
-		mapped_pfns[i] = mapped_dtb_pfn + i;
-		indexes[i] = dtb_pfn + i;
-	}
-
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
-					 indexes, mapped_pfns, err_codes);
-	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
-	printk("mapped_dtb = %p\n", mapped_dtb);
-	printk("U-Boot dtb start addr = %p, end addr = %p, binary size = 0x%llx\n", dtb_start,
-	       dtb_end, dtb_size);
-	printk("U-Boot dtb will be placed on addr = %p\n", (void *)dtb_addr);
-
-	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_dtb, dtb_start, dtb_size);
-
-	cacheflush.start_pfn = mapped_dtb_pfn;
-	cacheflush.nr_pfns = nr_pages;
-	rc = xen_domctl_cacheflush(0, &cacheflush);
-	printk("Return code for xen_domctl_cacheflush = %d\n", rc);
-
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_pages; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
-	}
+	uint32_t len;
+	uint64_t base_addr;
+	uint64_t mem_size = KB(domcfg->mem_kb);
+	struct uimage_hdr *uhdr = (struct uimage_hdr *)domcfg->img_start;
 
 	/*
-	 * After this Dom0 will have memory hole in mapped_domu address,
-	 * needed to populate memory on this address before freeing.
+	 * We expect Image to be loaded only in RAM0 Bank
+	 * ignoring space > GUEST_RAM0_SIZE
 	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
-	printk(">>> Return code = %d XENMEM_populate_physmap\n", rc);
+	if (mem_size > GUEST_RAM0_SIZE)
+		mem_size = GUEST_RAM0_SIZE;
 
-	k_free(mapped_dtb);
+	if (sys_be32_to_cpu(uhdr->magic_be32) != UIMAGE_MAGIC)
+		return -EINVAL;
+
+	len = sys_be32_to_cpu(uhdr->size_be32);
+	base_addr = sys_be32_to_cpu(uhdr->load_be32);
+	if (base_addr < GUEST_RAM0_BASE ||
+		base_addr > GUEST_RAM0_BASE + mem_size)
+		return -EINVAL;
+
+	if (base_addr + len > GUEST_RAM0_BASE + mem_size)
+		return -EINVAL;
+
+	return probe_zimage(domid, base_addr, sizeof(*uhdr), domcfg, modules);
+}
+
+int load_modules(int domid, struct xen_domain_cfg *domcfg,
+				 struct modules_address *modules)
+{
+	int rc;
+	uint64_t base_addr = GUEST_RAM0_BASE;
+	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
+
+	rc = prepare_domain_physmap(domid, base_pfn, domcfg);
+	if (rc) {
+		printk("Error preparing physmap. Err: %d\n", rc);
+		return rc;
+	}
+
+	rc = probe_uimage(domid, domcfg, modules);
+	if (rc) {
+		rc = probe_zimage(domid, base_addr, 0, domcfg, modules);
+		if (rc) {
+			printk("Error loading image, unsupported format\n");
+			return rc;
+		}
+	}
+
+	return 0;
 }
 
 int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem)
@@ -541,103 +714,20 @@ void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, co
 	xss_do_write(lbuffer, "pvh");
 }
 
-static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
-							 uint64_t kernbase, uint64_t kernsize,
-							 uint64_t dtbsize)
-{
-	const uint64_t dtb_len = ROUND_UP(dtbsize, MB(2));
-	const uint64_t ramend = rambase + ramsize;
-	const uint64_t ram128mb = rambase + MB(128);
-	const uint64_t kernsize_aligned = ROUND_UP(kernsize, MB(2));
-	const uint64_t kernend = kernbase + kernsize;
-	const uint64_t modsize = dtb_len;
-	uint64_t modbase;
-
-	printf("rambase = %lld, ramsize= %lld\n", rambase, ramsize);
-	printf("kernbase = %lld kernsize = %lld, dtbsize= %lld\n",
-		   kernbase, kernsize, dtbsize);
-	printf("kernsize_aligned = %lld\n", kernsize_aligned);
-
-	if (modsize + kernsize_aligned > ramsize) {
-		printf("Not enough memory in the first bank for the kernel+dtb+initrd\n");
-		return 0;
-	}
-
-	/*
-	 * Comment was taken from XEN source code from function
-	 * place_modules (xen/arch/arm/kernel.c) and added here for the
-	 * better understanding why this algorithm was used.
-	 * DTB must be loaded such that it does not conflict with the
-	 * kernel decompressor. For 32-bit Linux Documentation/arm/Booting
-	 * recommends just after the 128MB boundary while for 64-bit Linux
-	 * the recommendation in Documentation/arm64/booting.txt is below
-	 * 512MB.
-	 *
-	 * If the bootloader provides an initrd, it will be loaded just
-	 * after the DTB.
-	 *
-	 * We try to place dtb+initrd at 128MB or if we have less RAM
-	 * as high as possible. If there is no space then fallback to
-	 * just before the kernel.
-	 *
-	 * If changing this then consider
-	 * tools/libxc/xc_dom_arm.c:arch_setup_meminit as well.
-	 */
-
-	/*
-	 * According to the Linux Documentation/arm64/booting.rst Header notes:
-	 * Decompressed kernel image has Bit 3 in kernel flags:
-	 * Bit 3		Kernel physical placement
-	 *
-	 *  0
-	 *     2MB aligned base should be as close as possible
-	 *     to the base of DRAM, since memory below it is not
-	 *     accessible via the linear mapping
-	 *  1
-	 *     2MB aligned base may be anywhere in physical
-	 *     memory
-	 * When Bit 3 was set to 0 - then the memory below kernel base address
-	 * is not accessible by the kernel. That's why dtb should be placed
-	 * somewhere after kernel base address.
-	 */
-
-	if (ramend >= ram128mb + modsize && kernend < ram128mb)
-		modbase = ram128mb;
-	else if (ramend - modsize > kernsize_aligned)
-		modbase = ramend - modsize;
-	else if (kernbase - rambase > modsize)
-		modbase = kernbase - modsize;
-	else {
-		printf("Unable to find suitable location for dtb+initrd\n");
-		return 0;
-	}
-
-	return modbase;
-};
-
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 {
 	int rc = 0;
 	struct xen_domctl_createdomain config;
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domctl_scheduler_op sched_op;
-	uint64_t base_addr = GUEST_RAM0_BASE;
-	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
-	uint64_t dtb_addr;
-	uint64_t ventry;
 	struct xen_domain *domain;
 	char *domdtdevs;
+	struct modules_address modules = {0};
 
 	if (dom_num >= DOM_MAX) {
 		printk("Runtime exceeds maximum number of domains\n");
 		return -EINVAL;
 	}
-
-	dtb_addr = get_dtb_addr(base_addr, domcfg->mem_kb * 1024,
-				 base_addr, domcfg->img_end - domcfg->img_start,
-				 domcfg->dtb_end - domcfg->dtb_start);
-	if (!dtb_addr)
-		return -ENOMEM;
 
 	domdtdevs = domcfg->dtdevs;
 
@@ -674,13 +764,8 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	rc = allocate_domain_evtchns(domain);
 	printk("Return code = %d allocate_domain_evtchns\n", rc);
 
-	rc = prepare_domu_physmap(domid, base_pfn, domcfg);
-
-	ventry = load_domd_image(domid, base_addr, domcfg->img_start,
-							 domcfg->img_end);
-	load_domd_dtb(domid, dtb_addr, domcfg->dtb_start, domcfg->dtb_end);
-
-	if (ventry == NULL)
+	rc = load_modules(domid, domcfg, &modules);
+	if (rc || modules.ventry == NULL)
 	{
 		printk("Unable to load image, insufficient memory\n");
 		return 10;
@@ -693,8 +778,8 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	rc = assign_dtdevs(domid, domdtdevs, domcfg->nr_dtdevs);
 
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
-	vcpu_ctx.user_regs.x0 = dtb_addr;
-	vcpu_ctx.user_regs.pc64 = ventry;
+	vcpu_ctx.user_regs.x0 = modules.dtb_addr;
+	vcpu_ctx.user_regs.pc64 = modules.ventry;
 	vcpu_ctx.user_regs.cpsr = PSR_GUEST64_INIT;
 	vcpu_ctx.sctlr = SCTLR_GUEST_INIT;
 	vcpu_ctx.flags = VGCF_online;
