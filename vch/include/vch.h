@@ -10,6 +10,10 @@
 #include <zephyr/xen/public/xen.h>
 #include <zephyr/xen/public/io/libxenvchan.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct vch_handle {
 	int evtch;
 	struct vchan_interface *ring;
@@ -69,3 +73,7 @@ int vch_read(struct vch_handle *handle, void *buf, size_t size);
  */
 
 int vch_write(struct vch_handle *handle, const void *buf, size_t size);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
