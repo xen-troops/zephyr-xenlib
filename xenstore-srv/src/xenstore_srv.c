@@ -565,30 +565,41 @@ void remove_recurse(sys_dlist_t *chlds)
 	}
 }
 
-void handle_rm(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static int xss_do_rm(struct xs_entry *entry)
 {
-	struct xs_entry *entry = key_to_entry(payload);
+	if (!entry)
+		return -EINVAL;
 
-	if (entry) {
-		if (entry->key) {
-			k_free(entry->key);
-			entry->key = NULL;
-		}
-
-		if (entry->value) {
-			k_free(entry->value);
-			entry->value = NULL;
-		}
-
-		k_mutex_lock(&xsel_mutex, K_FOREVER);
-		sys_dlist_remove(&entry->node);
-		sys_dlist_t chlds = entry->child_list;
-		k_free(entry);
-		k_mutex_unlock(&xsel_mutex);
-
-		remove_recurse(&chlds);
+	if (entry->key) {
+		k_free(entry->key);
+		entry->key = NULL;
 	}
 
+	if (entry->value) {
+		k_free(entry->value);
+		entry->value = NULL;
+	}
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	sys_dlist_remove(&entry->node);
+	sys_dlist_t chlds = entry->child_list;
+
+	k_free(entry);
+	k_mutex_unlock(&xsel_mutex);
+
+	remove_recurse(&chlds);
+	return 0;
+}
+
+int xss_rm(const char *path)
+{
+	return xss_do_rm(key_to_entry(path));
+}
+
+void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
+	       uint32_t len)
+{
+	xss_do_rm(key_to_entry(payload));
 	send_reply_read(domain, id, XS_RM, "");
 }
 
