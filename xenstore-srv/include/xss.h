@@ -53,3 +53,10 @@ int xss_read_integer(const char *path, int *value);
  */
 int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
 
+/*
+ * Removes the value associated with a path.
+ *
+ * @param path Xenstore path
+ * @return 0 on success, a negative errno value on error.
+ */
+int xss_rm(const char *path);
