@@ -51,6 +51,14 @@ config XEN_VCH
 	help
 	  Enable vchannel communication library.
 
+config XRUN_MAX_PATH_SIZE
+	int "Maximum length of file path to read from storage"
+	default 255
+	help
+	  Sets the maximum path size that xrun can read from storage.
+	  The default value is set to LFS_NAME_MAX which is default
+	  for littlefs configuration.
+
 config PFN_CHUNK_SIZE
 	int "Chunk size for memory mapping operations"
 	default 128
