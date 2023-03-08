@@ -7,6 +7,7 @@
 #ifndef XENLIB_XEN_DOMAIN_H
 #define XENLIB_XEN_DOMAIN_H
 
+#include <sys/types.h>
 #include <zephyr/xen/events.h>
 #include <zephyr/xen/generic.h>
 
@@ -18,6 +19,10 @@ struct xen_domain_iomem {
 	/* how much frames to map */
 	uint64_t nr_mfns;
 };
+
+typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
+				uint64_t image_load_offset, void *image_info);
+typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
 struct xen_domain_cfg {
 	uint64_t mem_kb;
@@ -47,8 +52,12 @@ struct xen_domain_cfg {
 
 	char *cmdline;
 
-	const char *img_start, *img_end;
 	const char *dtb_start, *dtb_end;
+
+	load_image_bytes_t load_image_bytes;
+	get_image_size_t get_image_size;
+
+	void *image_info;
 };
 
 struct xen_domain_console {
