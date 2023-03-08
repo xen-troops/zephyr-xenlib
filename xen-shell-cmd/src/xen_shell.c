@@ -18,6 +18,7 @@
 
 #include "domain.h"
 #include "xenstore_srv.h"
+#include <xen_shell.h>
 
 LOG_MODULE_REGISTER(xen_shell);
 

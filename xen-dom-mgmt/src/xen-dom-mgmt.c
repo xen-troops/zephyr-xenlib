@@ -31,6 +31,7 @@
 #include "xen-dom-fdt.h"
 
 #include <xenstore_srv.h>
+#include <xen_shell.h>
 #include <xss.h>
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
