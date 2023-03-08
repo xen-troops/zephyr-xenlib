@@ -283,7 +283,7 @@ void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *d
 
 	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 	if (!mapped_dtb)
-		return -ENOMEM;
+		return;
 
 	mapped_dtb_pfn = xen_virt_to_gfn((uint64_t)mapped_dtb);
 
