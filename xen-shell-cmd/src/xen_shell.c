@@ -17,6 +17,7 @@
 
 #include "domain.h"
 #include "xenstore_srv.h"
+#include <xen_shell.h>
 
 #define XSS_CONSOLE_STACK_SIZE_PER_DOM 8192
 K_KERNEL_STACK_DEFINE(read_thrd_stack, XSS_CONSOLE_STACK_SIZE_PER_DOM * DOM_MAX);
