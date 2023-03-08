@@ -885,7 +885,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 #else /* CONFIG_XEN_LIBFDT */
 int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 		size_t *fdtsize, int xen_major, int xen_minor,
-		void *pfdt, size_t pfdt_size. int domid)
+		void *pfdt, size_t pfdt_size, int domid)
 {
 	printk("Domain device tree generation is not supported\n");
 	*fdtaddr = pfdt;
