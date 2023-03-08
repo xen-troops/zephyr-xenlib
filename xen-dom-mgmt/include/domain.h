@@ -78,4 +78,6 @@ struct xen_domain {
 	bool pending_stop_transaction;
 };
 
+struct xen_domain *domid_to_domain(uint32_t domid);
+
 #endif /* XENLIB_XEN_DOMAIN_H */

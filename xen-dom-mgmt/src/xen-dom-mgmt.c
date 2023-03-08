@@ -617,6 +617,12 @@ int map_domain_console_ring(struct xen_domain *domain)
 	return 0;
 }
 
+/*
+ * TODO: Access to domain_list and domains should be protected, considering that it may be
+ * destroyed after receiving pointer to actual domain. So all accesses to domains structs should be
+ * protected globally or via refcounts. This requires code audit in all libs, that are using this
+ * function (currently xenstore-srv and xen_shell).
+ */
 struct xen_domain *domid_to_domain(uint32_t domid)
 {
 	struct xen_domain *iter;
