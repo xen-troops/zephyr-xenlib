@@ -360,6 +360,13 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	return 0;
 }
 
+/*
+ * TODO: this function should not be called from anywhere except event channel
+ * handler. Need to understand why notify_sibling_domains() works in such way
+ * and fix it. Declaration is needed to avoid compiler warnings during build.
+ */
+void xs_evtchn_cb(void *priv);
+
 //TODO: header, moveto dom0.c
 void notify_sibling_domains(uint32_t *sdom_list, size_t len)
 {
@@ -511,6 +518,7 @@ void handle_read(struct xen_domain *domain, uint32_t id, char *payload, uint32_t
 {
 	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
+	struct xs_entry *entry;
 
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, strlen(payload) + 1);
@@ -518,8 +526,7 @@ void handle_read(struct xen_domain *domain, uint32_t id, char *payload, uint32_t
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
-	struct xenstore_domain_interface *intf = domain->domint;
-	struct xs_entry *entry = key_to_entry(path);
+	entry = key_to_entry(path);
 
 	if (entry) {
 		send_reply_read(domain, id, XS_READ, entry->value ? entry->value : "");
