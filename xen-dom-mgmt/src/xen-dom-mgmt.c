@@ -30,6 +30,7 @@
 #include "xen-dom-fdt.h"
 
 #include <xenstore_srv.h>
+#include <xen_shell.h>
 #include <xss.h>
 
 extern struct xen_domain_cfg domd_cfg;
