@@ -61,13 +61,24 @@ struct xs_entry *key_to_entry(const char *key)
 	char *tok, *tok_state;
 	struct xs_entry *next, *iter = NULL;
 	sys_dlist_t *inspected_list = &root_xenstore.child_list;
-	size_t keyl = strlen(key);
+	char key_buffer[XENSTORE_ABS_PATH_MAX + 1];
+	size_t keyl;
+
+	if (!key)
+		return NULL;
+
+	keyl = strlen(key);
+	if (keyl > XENSTORE_ABS_PATH_MAX)
+		return NULL;
 
 	if (strncmp(rootdir, key, keyl) == 0) {
 		return &root_xenstore;
 	}
 
-	for (tok = strtok_r(key, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
+	strncpy(key_buffer, key, keyl + 1);
+	for (tok = strtok_r(key_buffer, "/", &tok_state);
+	     tok != NULL;
+	     tok = strtok_r(NULL, "/", &tok_state)) {
 		SYS_DLIST_FOR_EACH_CONTAINER_SAFE (inspected_list, iter, next, node) {
 			if (strcmp(iter->key, tok) == 0) {
 				break;
