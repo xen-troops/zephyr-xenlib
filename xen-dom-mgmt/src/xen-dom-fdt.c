@@ -8,9 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zephyr/sys/printk.h>
+#include <zephyr/logging/log.h>
 
 #include "domain.h"
+
+LOG_MODULE_DECLARE(xen_dom_mgmt);
 
 #if defined(CONFIG_XEN_LIBFDT)
 
@@ -63,7 +65,7 @@ static int fdt_property_compat(void *fdt, unsigned int nr_compat, ...)
 	va_end(ap);
 
 	if (sz > FDT_STRING_MAX) {
-		printk("Compatible string is too long\n");
+		LOG_ERR("Compatible string is too long");
 		return -ENOMEM;
 	}
 
@@ -182,7 +184,7 @@ static int create_chosen(void *fdt, const char *cmdline)
 	if (res)
 		return res;
 
-	printk("bootargs = %s", cmdline);
+	LOG_INF("bootargs = %s", cmdline);
 	res = fdt_property_string(fdt, "bootargs", cmdline);
 	if (res)
 		return res;
@@ -334,7 +336,7 @@ static int create_memory(void *fdt, uint64_t memsize)
 	}
 
 	if (size_left) {
-		printk("Too much memory allocated for the domain\n");
+		LOG_ERR("Too much memory allocated for the domain");
 		return -EINVAL;
 	}
 
@@ -558,7 +560,7 @@ static int fill_hypervisor_regs(void *fdt, struct xen_domain_cfg *domcfg,
 		if (region_size[i] < EXT_REGION_MIN_SIZE)
 			continue;
 
-		printk("Extended region %u: %#" PRIx64 "->%#" PRIx64 "\n",
+		LOG_INF("Extended region %d: %#" PRIx64 "->%#" PRIx64,
 			nr_regions, region_base[i],
 			region_base[i] + region_size[i]);
 
@@ -569,7 +571,7 @@ static int fill_hypervisor_regs(void *fdt, struct xen_domain_cfg *domcfg,
 	}
 
 	if (!nr_regions) {
-		printk("Unable to allocate extended regions\n");
+		LOG_ERR("Unable to allocate extended regions");
 		return -ENOMEM;
 	}
 
@@ -627,7 +629,7 @@ static int create_optee(void *fdt)
 {
 	int res;
 
-	printk("Creating OP-TEE node in dtb\n");
+	LOG_INF("Creating OP-TEE node in dtb");
 
 	res = fdt_begin_node(fdt, "firmware");
 	if (res)
@@ -661,18 +663,18 @@ static int check_fdt(void *fdt, size_t size)
 	int r;
 
 	if (fdt_magic(fdt) != FDT_MAGIC) {
-		printk("FDT is not a valid");
+		LOG_ERR("FDT is not a valid");
 		return -EINVAL;
 	}
 
 	r = fdt_check_header(fdt);
 	if (r) {
-		printk("Failed to check the FDT (%d)", r);
+		LOG_ERR("Failed to check the FDT (rc=%d)", r);
 		return -EINVAL;
 	}
 
 	if (fdt_totalsize(fdt) > size) {
-		printk("Partial FDT totalsize is too big");
+		LOG_ERR("Partial FDT totalsize is too big");
 		return -EINVAL;
 	}
 
@@ -766,13 +768,13 @@ static int copy_pfdt(void *fdt, void *pfdt)
 
 	r = copy_node_by_path("/passthrough", fdt, pfdt);
 	if (r < 0) {
-		printk("Can't copy the node \"/passthrough\"");
+		LOG_ERR("Can't copy the node \"/passthrough\"");
 		return r;
 	}
 
 	r = copy_node_by_path("/aliases", fdt, pfdt);
 	if (r < 0 && r != -FDT_ERR_NOTFOUND) {
-		printk("Can't copy the node \"/aliases\"");
+		LOG_ERR("Can't copy the node \"/aliases\"");
 		return r;
 	}
 
@@ -781,7 +783,7 @@ static int copy_pfdt(void *fdt, void *pfdt)
 
 static inline int fdt_to_errno(int rc)
 {
-	printk("DT create nodes failed: %d = %s", rc, fdt_strerror(rc));
+	LOG_ERR("DT create nodes failed: %d = %s", rc, fdt_strerror(rc));
 	return (rc == -FDT_ERR_NOSPACE) ? -ENOMEM : -EINVAL;
 }
 
@@ -794,7 +796,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 
 	if (pfdt)
 		if (check_fdt(pfdt, pfdt_size)) {
-			printk("Partial device-tree check was failed\n");
+			LOG_ERR("Partial device-tree check was failed");
 			return -EINVAL;
 		}
 
@@ -844,7 +846,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 
 		break;
 	default:
-		printk("Error: Unknown GIC version\n");
+		LOG_ERR("Error: Unknown GIC version");
 		return -EINVAL;
 	}
 
@@ -887,7 +889,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 		size_t *fdtsize, int xen_major, int xen_minor,
 		void *pfdt, size_t pfdt_size, int domid)
 {
-	printk("Domain device tree generation is not supported\n");
+	LOG_WRN("Domain device tree generation is not supported");
 	*fdtaddr = pfdt;
 	*fdtsize = pfdt_size;
 	return 0;
