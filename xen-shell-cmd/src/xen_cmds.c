@@ -5,9 +5,12 @@
  */
 
 #include <zephyr/shell/shell.h>
+#include <zephyr/logging/log.h>
 #include <stdlib.h>
 
 #include <xen_dom_mgmt.h>
+
+LOG_MODULE_DECLARE(xen_shell);
 
 extern struct xen_domain_cfg domd_cfg;
 
@@ -35,7 +38,7 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 
 	domid = parse_domid(argc, argv);
 	if (!domid) {
-		printk("Invalid domid passed to create cmd\n");
+		LOG_ERR("Invalid domid passed to create cmd");
 		return -EINVAL;
 	}
 	/*

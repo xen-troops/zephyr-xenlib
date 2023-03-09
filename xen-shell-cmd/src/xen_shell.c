@@ -12,12 +12,15 @@
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <string.h>
 #include <stdio.h>
 
 #include "domain.h"
 #include "xenstore_srv.h"
 #include <xen_shell.h>
+
+LOG_MODULE_REGISTER(xen_shell);
 
 #define XSS_CONSOLE_STACK_SIZE_PER_DOM 8192
 K_KERNEL_STACK_DEFINE(read_thrd_stack, XSS_CONSOLE_STACK_SIZE_PER_DOM * DOM_MAX);
@@ -74,7 +77,7 @@ void console_read_thrd(void *dom, void *p2, void *p3)
 				memcpy(out, buffer, recv);
 
 				/* Transfer output to Zephyr Dom0 console */
-				printk("%s", buffer);
+				LOG_RAW("%s", buffer);
 			}
 		} while (recv);
 	}
@@ -100,13 +103,13 @@ int init_domain_console(struct xen_domain *domain)
 
 	k_sem_init(&domain->console_sem, 1, 1);
 
-	printk("%s: bind evtchn %d as %d\n", __func__, domain->console_evtchn,
+	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, domain->console_evtchn,
 	       domain->local_console_evtchn);
 
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid, domain->console_evtchn);
 
 	if (rc) {
-		printk("Failed to set domain console evtchn param, rc= %d\n", rc);
+		LOG_ERR("Failed to set domain console evtchn param (rc=%d)", rc);
 		return rc;
 	}
 
@@ -118,14 +121,14 @@ int start_domain_console(struct xen_domain *domain)
 	size_t slot = 0;
 
 	if (domain->console_tid) {
-		printk("Console thread is already running for this domain!\n");
+		LOG_ERR("Console thread is already running for this domain!");
 		return -EBUSY;
 	}
 
 	for (; slot < DOM_MAX && stack_slots[slot] != 0; ++slot);
 
 	if (slot >= DOM_MAX) {
-		printk("Unable to find memory for console stack (%ld >= MAX:%d)\n", slot, DOM_MAX);
+		LOG_ERR("Unable to find memory for console stack (%zu >= MAX:%d)", slot, DOM_MAX);
 		return 1;
 	}
 
@@ -146,7 +149,7 @@ int stop_domain_console(struct xen_domain *domain)
 	size_t slot = 0;
 
 	if (!domain->console_tid) {
-		printk("No console thread is running!\n");
+		LOG_ERR("No console thread is running!");
 		return -ESRCH;
 	}
 
@@ -167,7 +170,7 @@ int stop_domain_console(struct xen_domain *domain)
 
 	if (rc)
 	{
-		printk("Unable to close event channel: %d\n", domain->local_console_evtchn);
+		LOG_ERR("Unable to close event channel#%u", domain->local_console_evtchn);
 		return rc;
 	}
 
