@@ -31,6 +31,7 @@
 #include "xen-dom-fdt.h"
 
 #include <xenstore_srv.h>
+#include <xss.h>
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
 
@@ -681,51 +682,51 @@ void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, co
 	// TODO: generate properly
 	snprintf(uuid, 40, "00000000-0000-0000-0000-%012d", domid);
 
-	xss_do_write("/tool/xenstored", "");
+	xss_write("/tool/xenstored", "");
 
 	for (int i = 0; i < domcfg->max_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
-		xss_do_write(lbuffer, "online");
+		xss_write(lbuffer, "online");
 	}
 
 	sprintf(lbuffer, "%s/%d/memory/static-max", basepref, domid);
 	sprintf(rbuffer, "%lld", domain->max_mem_kb);
-	xss_do_write(lbuffer, rbuffer);
+	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "%s/%d/memory/target", basepref, domid);
-	xss_do_write(lbuffer, rbuffer);
+	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "%s/%d/memory/videoram", basepref, domid);
-	xss_do_write(lbuffer, "-1");
+	xss_write(lbuffer, "-1");
 	sprintf(lbuffer, "%s/%d/control/platform-feature-multiprocessor-suspend", basepref, domid);
-	xss_do_write(lbuffer, "1");
+	xss_write(lbuffer, "1");
 	sprintf(lbuffer, "%s/%d/control/platform-feature-xs_reset_watches", basepref, domid);
-	xss_do_write(lbuffer, "1");
+	xss_write(lbuffer, "1");
 
 	sprintf(lbuffer, "%s/%d/vm", basepref, domid);
-	xss_do_write(lbuffer, uuid);
+	xss_write(lbuffer, uuid);
 
 	sprintf(lbuffer, "/vm/%s/name", uuid);
 	sprintf(rbuffer, "zephyr-%d", domid);
-	xss_do_write(lbuffer, rbuffer);
+	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/local/domain/%d/name", domid);
-	xss_do_write(lbuffer, rbuffer);
+	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/vm/%s/start_time", uuid);
-	xss_do_write(lbuffer, "0");
+	xss_write(lbuffer, "0");
 	sprintf(lbuffer, "/vm/%s/uuid", uuid);
-	xss_do_write(lbuffer, uuid);
+	xss_write(lbuffer, uuid);
 
 	sprintf(lbuffer, "%s/%d/domid", basepref, domid);
 	sprintf(rbuffer, "%d", domid);
-	xss_do_write(lbuffer, rbuffer);
+	xss_write(lbuffer, rbuffer);
 
 	for (int i = 0; dirs[i]; ++i) {
 		sprintf(lbuffer, "%s/%d/%s", basepref, domid, dirs[i]);
-		xss_do_write(lbuffer, "");
+		xss_write(lbuffer, "");
 	}
 
 	sprintf(lbuffer, "/libxl/%d/dm-version", domid);
-	xss_do_write(lbuffer, "qemu_xen_traditional");
+	xss_write(lbuffer, "qemu_xen_traditional");
 	sprintf(lbuffer, "/libxl/%d/type", domid);
-	xss_do_write(lbuffer, "pvh");
+	xss_write(lbuffer, "pvh");
 }
 
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
