@@ -12,10 +12,13 @@
 #include <zephyr/xen/public/hvm/params.h>
 #include <zephyr/xen/public/io/xs_wire.h>
 #include <zephyr/xen/hvm.h>
+#include <zephyr/logging/log.h>
 
 #include "domain.h"
 #include "xenstore_srv.h"
 #include "xss.h"
+
+LOG_MODULE_REGISTER(xenstore);
 
 #define XENSTORE_STACK_SIZE_PER_DOM (32 * 1024)
 K_KERNEL_STACK_DEFINE(xenstore_thrd_stack, XENSTORE_STACK_SIZE_PER_DOM *DOM_MAX);
@@ -217,11 +220,11 @@ void handle_directory(struct xen_domain *domain, uint32_t id, char *payload, uin
 void send_errno(struct xen_domain *domain, uint32_t id, int err)
 {
 	unsigned int i;
-	printk("Sending error=%d\n", err);
+	LOG_ERR("Sending error=%d", err);
 
 	for (i = 0; err != xsd_errors[i].errnum; i++) {
 		if (i == ARRAY_SIZE(xsd_errors) - 1) {
-			printk("xenstored: error %i untranslatable", err);
+			LOG_ERR("xenstored: error %i untranslatable", err);
 			i = 0; /* EINVAL */
 			break;
 		}
@@ -380,7 +383,7 @@ void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, ch
 	char *data = payload + data_offset;
 
 	if (len < data_offset) {
-		printk("SIZES MISMATCH\n");
+		LOG_ERR("Data size mismatch");
 		send_errno(domain, id, EINVAL);
 		return;
 	}
@@ -677,7 +680,7 @@ void handle_transaction_start(struct xen_domain *domain, uint32_t id, char *payl
 
 	if (domain->running_transaction)
 	{
-		printk("%d: transaction already started\n", domain->domid);
+		LOG_ERR("domid#%u: transaction already started", domain->domid);
 		send_errno(domain, id, EBUSY);
 		return;
 	}
@@ -728,7 +731,7 @@ int start_domain_stored(struct xen_domain *domain)
 
 	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
 	if (rc) {
-		printk("Failed to set domain xenbus evtchn param, rc= %d\n", rc);
+		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
 		return rc;
 	}
 
@@ -738,7 +741,7 @@ int start_domain_stored(struct xen_domain *domain)
 		;
 
 	if (slot >= DOM_MAX) {
-		printk("Unable to find memory for xenbus stack (%ld >= MAX:%d)\n", slot, DOM_MAX);
+		LOG_ERR("Unable to find memory for xenbus stack (%zu >= MAX:%d)", slot, DOM_MAX);
 		return 1;
 	}
 
@@ -756,7 +759,7 @@ int stop_domain_stored(struct xen_domain *domain)
 {
 	int rc = 0;
 
-	printk("Destroy domain=%p\n", domain);
+	LOG_DBG("Destroy domain#%u", domain->domid);
 	domain->xenstore_thrd_stop = true;
 	k_sem_give(&domain->xb_sem);
 	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
@@ -766,7 +769,7 @@ int stop_domain_stored(struct xen_domain *domain)
 
 	if (rc)
 	{
-		printk("Unable to close event channel %d, rc=%d\n", domain->local_xenstore_evtchn, rc);
+		LOG_ERR("Unable to close event channel#%u (rc=%d)", domain->local_xenstore_evtchn, rc);
 	}
 
 	return rc;
@@ -857,7 +860,7 @@ void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 		} while (sz < header->len);
 
 		if (message_handle_list[header->type].h == NULL) {
-			printk("Unsupported message type: %d\n", header->type);
+			LOG_ERR("Unsupported message type: %u", header->type);
 			send_errno(domain, header->req_id, ENOSYS);
 		} else {
 			message_handle_list[header->type].h(domain, header->req_id,
