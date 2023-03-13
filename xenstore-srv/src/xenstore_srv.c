@@ -15,6 +15,7 @@
 #include <zephyr/xen/hvm.h>
 #include <zephyr/logging/log.h>
 
+#include <mem-mgmt.h>
 #include "domain.h"
 #include "xenstore_srv.h"
 #include "xss.h"
@@ -805,26 +806,7 @@ void xs_evtchn_cb(void *priv)
 int start_domain_stored(struct xen_domain *domain)
 {
 	size_t slot = 0;
-	int rc = 0;
-
-	k_sem_init(&domain->xb_sem, 0, 1);
-	rc = bind_interdomain_event_channel(domain->domid,
-								       domain->xenstore_evtchn,
-								       xs_evtchn_cb,
-								       (void *)domain);
-
-	if (rc < 0)
-		return rc;
-
-	domain->local_xenstore_evtchn = rc;
-
-	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
-	if (rc) {
-		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
-		return rc;
-	}
-
-	domain->xenstore_thrd_stop = false;
+	int rc = 0, err_ret;
 
 	for (; slot < CONFIG_DOM_MAX && stack_slots[slot] != 0; ++slot)
 		;
@@ -832,9 +814,41 @@ int start_domain_stored(struct xen_domain *domain)
 	if (slot >= CONFIG_DOM_MAX) {
 		LOG_ERR("Unable to find memory for xenbus stack (%zu >= MAX:%d)",
 			slot, CONFIG_DOM_MAX);
-		return 1;
+		return -E2BIG;
 	}
 
+	rc = xenmem_map_region(domain->domid, 1,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
+			       XENSTORE_PFN_OFFSET,
+			       (void **)&domain->domint);
+	if (rc < 0) {
+		LOG_ERR("Failed to map xenstore ring for domain#%u (rc=%d)",
+			domain->domid, rc);
+		return rc;
+	}
+
+	domain->domint->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
+	domain->domint->connection = XENSTORE_CONNECTED;
+
+	k_sem_init(&domain->xb_sem, 0, 1);
+	rc = bind_interdomain_event_channel(domain->domid,
+					    domain->xenstore_evtchn,
+					    xs_evtchn_cb,
+					    (void *)domain);
+	if (rc < 0) {
+		LOG_ERR("Failed to bind interdomain event channel (rc=%d)", rc);
+		goto unmap_ring;
+	}
+
+	domain->local_xenstore_evtchn = rc;
+
+	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
+	if (rc) {
+		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
+		goto unmap_ring;
+	}
+
+	domain->xenstore_thrd_stop = false;
 	stack_slots[slot] = domain->domid;
 	domain->stack_slot = slot;
 	domain->xenstore_tid =
@@ -846,11 +860,19 @@ int start_domain_stored(struct xen_domain *domain)
 				domain, NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;
+
+unmap_ring:
+	err_ret = xenmem_unmap_region(1, domain->domint);
+	if (err_ret < 0) {
+		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
+			domain->domid, err_ret);
+	}
+	return rc;
 }
 
 int stop_domain_stored(struct xen_domain *domain)
 {
-	int rc = 0;
+	int rc = 0, err = 0;
 
 	LOG_DBG("Destroy domain#%u", domain->domid);
 	domain->xenstore_thrd_stop = true;
@@ -858,14 +880,22 @@ int stop_domain_stored(struct xen_domain *domain)
 	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
 	stack_slots[domain->stack_slot] = 0;
 	unbind_event_channel(domain->local_xenstore_evtchn);
-	rc = evtchn_close(domain->local_xenstore_evtchn);
 
-	if (rc)
-	{
-		LOG_ERR("Unable to close event channel#%u (rc=%d)", domain->local_xenstore_evtchn, rc);
+	rc = evtchn_close(domain->local_xenstore_evtchn);
+	if (rc) {
+		LOG_ERR("Unable to close event channel#%u (rc=%d)",
+			domain->local_xenstore_evtchn, rc);
+		err = rc;
 	}
 
-	return rc;
+	rc = xenmem_unmap_region(1, domain->domint);
+	if (rc < 0) {
+		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
+			domain->domid, rc);
+		err = rc;
+	}
+
+	return err;
 }
 
 void cleanup_domain_watches(struct xen_domain *domain)
