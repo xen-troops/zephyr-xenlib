@@ -20,6 +20,7 @@
 #include "domain.h"
 #include "xenstore_srv.h"
 #include <xen_console.h>
+#include <mem-mgmt.h>
 
 LOG_MODULE_REGISTER(xen_domain_console);
 
@@ -197,21 +198,27 @@ static void evtchn_callback(void *priv)
 	k_sem_give(&console->ext_sem);
 }
 
-int xen_init_domain_console(struct xen_domain *domain)
+static int xen_init_domain_console(struct xen_domain *domain)
 {
 	int rc = 0;
 	struct xen_domain_console *console;
 
-	if (!domain) {
-		LOG_ERR("No domain passed to attach_domain_console");
-		return -ESRCH;
+	console = &domain->console;
+	rc = xenmem_map_region(domain->domid, 1,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
+			       CONSOLE_PFN_OFFSET,
+			       (void **)&console->intf);
+	if (rc < 0) {
+		LOG_ERR("Failed to map console ring for domain#%u (rc=%d)",
+			domain->domid, rc);
+		return rc;
 	}
 
-	console = &domain->console;
 	console->int_buf = k_malloc(XEN_CONSOLE_BUFFER_SZ);
 	if (!console->int_buf) {
 		LOG_ERR("Failed to allocate domain console buffer");
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto unmap_ring;
 	}
 	console->int_prod = 0;
 	console->int_cons = 0;
@@ -255,11 +262,15 @@ err_unbind:
 err_free:
 	k_free(console->int_buf);
 
+unmap_ring:
+	xenmem_unmap_region(1, console->intf);
+
 	return rc;
 }
 
 int xen_start_domain_console(struct xen_domain *domain)
 {
+	int rc;
 	struct xen_domain_console *console;
 
 	if (!domain) {
@@ -271,6 +282,12 @@ int xen_start_domain_console(struct xen_domain *domain)
 	if (console->ext_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
 		return -EBUSY;
+	}
+
+	rc = xen_init_domain_console(domain);
+	if (rc) {
+		LOG_ERR("Unable to init domain#%u console (rc=%d)", domain->domid, rc);
+		return rc;
 	}
 
 	console->stack_idx = get_stack_idx();
@@ -289,7 +306,7 @@ int xen_start_domain_console(struct xen_domain *domain)
 
 int xen_stop_domain_console(struct xen_domain *domain)
 {
-	int rc;
+	int rc, err = 0;
 	struct xen_domain_console *console;
 
 	if (!domain) {
@@ -325,16 +342,22 @@ int xen_stop_domain_console(struct xen_domain *domain)
 	k_free(console->int_buf);
 
 	unbind_event_channel(console->local_evtchn);
-	rc = evtchn_close(console->local_evtchn);
 
-	if (rc)
-	{
+	rc = evtchn_close(console->local_evtchn);
+	if (rc) {
 		LOG_ERR("Unable to close event channel#%u",
 			console->local_evtchn);
-		return rc;
+		err = rc;
 	}
 
-	return 0;
+	rc = xenmem_unmap_region(1, console->intf);
+	if (rc < 0) {
+		LOG_ERR("Failed to unmap domain#%u console ring (rc=%d)",
+			domain->domid, rc);
+		err = rc;
+	}
+
+	return err;
 }
 
 #ifdef CONFIG_XEN_SHELL
