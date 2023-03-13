@@ -593,73 +593,6 @@ int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
 	return rc;
 }
 
-int map_domain_xenstore_ring(struct xen_domain *domain)
-{
-	void *mapped_ring;
-	xen_pfn_t ring_pfn, idx;
-	int err, rc;
-	struct xenstore_domain_interface *intf;
-
-	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
-	if (!mapped_ring) {
-		LOG_ERR("Failed to alloc memory for domain#%u console ring buffer",
-		       domain->domid);
-		return -ENOMEM;
-	}
-
-	memset(mapped_ring, 0, XEN_PAGE_SIZE);
-	ring_pfn = xen_virt_to_gfn(mapped_ring);
-	idx = XEN_PHYS_PFN(GUEST_MAGIC_BASE) + XENSTORE_PFN_OFFSET;
-
-	/* adding single page, but only xatpb can map with foreign domid */
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
-					 &idx, &ring_pfn, &err);
-	if (rc) {
-		LOG_ERR("Failed to map xenstore ring buffer for domain#%u (rc=%d)",
-		       domain->domid, rc);
-		k_free(mapped_ring);
-		return rc;
-	}
-
-	domain->domint = mapped_ring;
-	intf = (struct xenstore_domain_interface *)domain->domint;
-	intf->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
-	intf->connection = XENSTORE_CONNECTED;
-
-	return 0;
-}
-
-int map_domain_console_ring(struct xen_domain *domain)
-{
-	void *mapped_ring;
-	xen_pfn_t ring_pfn, idx;
-	int err, rc;
-
-	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
-	if (!mapped_ring) {
-		LOG_ERR("Failed to alloc memory for domain#%u console ring buffer",
-		       domain->domid);
-		return -ENOMEM;
-	}
-
-	ring_pfn = xen_virt_to_gfn(mapped_ring);
-	memset(mapped_ring, 0, XEN_PAGE_SIZE);
-	idx = XEN_PHYS_PFN(GUEST_MAGIC_BASE) + CONSOLE_PFN_OFFSET;
-
-	/* adding single page, but only xatpb can map with foreign domid */
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
-					 &idx, &ring_pfn, &err);
-	if (rc) {
-		LOG_ERR("Failed to map console ring buffer for domain#%u (rc=%d)", domain->domid,
-		       rc);
-		return rc;
-	}
-
-	domain->console.intf = mapped_ring;
-
-	return 0;
-}
-
 /*
  * TODO: Access to domain_list and domains should be protected, considering that it may be
  * destroyed after receiving pointer to actual domain. So all accesses to domains structs should be
@@ -848,32 +781,11 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	sys_dlist_append(&domain_list, &domain->node);
 	k_mutex_unlock(&dl_mutex);
 
-	rc = map_domain_xenstore_ring(domain);
-
-	if (rc) {
-		LOG_ERR("Unable to map domain xenstore ring (rc=%d)", rc);
-		return rc;
-	}
-
 	rc = start_domain_stored(domain);
 	if (rc) {
 		return rc;
 	}
 
-	/* TODO: do this on console creation */
-	rc = map_domain_console_ring(domain);
-	if (rc) {
-		return rc;
-	}
-	LOG_DBG("Map domain ring succeeded");
-
-	/* TODO: for debug, remove this or set as optional */
-	rc = xen_init_domain_console(domain);
-
-	if (rc) {
-		LOG_ERR("Unable to init domain console (rc=%d)", rc);
-		return rc;
-	}
 
 	rc = xen_start_domain_console(domain);
 
@@ -896,18 +808,6 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	return rc;
 }
 
-void unmap_domain_ring(void *p)
-{
-	xen_pfn_t ring_pfn = xen_virt_to_gfn(p);
-	int rc = xendom_remove_from_physmap(DOMID_SELF, ring_pfn);
-	LOG_DBG("Return code for xendom_remove_from_physmap = %d [%p]", rc, p);
-
-	rc = xendom_populate_physmap(DOMID_SELF, 0, 1, 0, &ring_pfn);
-	LOG_DBG("Return code for xendom_populate_physmap = %d [%p]", rc, p);
-
-	k_free(p);
-}
-
 int domain_destroy(uint32_t domid)
 {
 	int rc;
@@ -923,9 +823,6 @@ int domain_destroy(uint32_t domid)
 	stop_domain_stored(domain);
 	/* TODO: do this on console destroying */
 	xen_stop_domain_console(domain);
-
-	unmap_domain_ring(domain->console.intf);
-	unmap_domain_ring(domain->domint);
 
 	rc = xen_domctl_destroydomain(domid);
 	LOG_DBG("Return code = %d XEN_DOMCTL_destroydomain", rc);
