@@ -810,7 +810,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 
 int domain_destroy(uint32_t domid)
 {
-	int rc;
+	int rc, err = 0;
 	struct xen_domain *domain = NULL;
 
 	domain = domid_to_domain(domid);
@@ -820,22 +820,32 @@ int domain_destroy(uint32_t domid)
 		return -EINVAL;
 	}
 
-	stop_domain_stored(domain);
-	/* TODO: do this on console destroying */
-	xen_stop_domain_console(domain);
+	rc = stop_domain_stored(domain);
+	if (rc) {
+		LOG_ERR("Failed to stop domain#%u store (rc=%d)", domain->domid, rc);
+		err = rc;
+	}
+
+	rc = xen_stop_domain_console(domain);
+	if (rc) {
+		LOG_ERR("Failed to stop domain#%u console (rc=%d)", domain->domid, rc);
+		err = rc;
+	}
 
 	rc = xen_domctl_destroydomain(domid);
-	LOG_DBG("Return code = %d XEN_DOMCTL_destroydomain", rc);
+	if (rc) {
+		LOG_ERR("Failed to destroy domain#%u (rc=%d)", domain->domid, rc);
+		err = rc;
+	}
 
 	k_mutex_lock(&dl_mutex, K_FOREVER);
 	sys_dlist_remove(&domain->node);
+	--dom_num;
 	k_mutex_unlock(&dl_mutex);
 
 	k_free(domain);
 
-	--dom_num;
-
-	return rc;
+	return err;
 }
 
 int domain_pause(uint32_t domid)
