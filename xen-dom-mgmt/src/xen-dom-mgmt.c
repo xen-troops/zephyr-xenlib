@@ -33,7 +33,7 @@
 #include <xenstore_srv.h>
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
-
+#define DOMAIN_PAGES_MAX 256
 extern struct xen_domain_cfg domd_cfg;
 
 struct modules_address {
@@ -272,34 +272,120 @@ static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
 	return modbase;
 };
 
-void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
+static int xen_rm_pages_from_physmap(uint64_t nr_pages, void *mapped_addr)
 {
-	int i, rc;
+	int rc = 0;
+	unsigned int i;
+	xen_pfn_t mapped_pfns[DOMAIN_PAGES_MAX];
+	xen_pfn_t mapped_addr_pfn;
+
+	__ASSERT(nr_pages < DOMAIN_PAGES_MAX, "Too may pages requested");
+
+	mapped_addr_pfn = xen_virt_to_gfn((uint64_t)mapped_addr);
+
+	for (i = 0; i < nr_pages; i++) {
+		mapped_pfns[i] = mapped_addr_pfn + i;
+	}
+
+	/* Needed to remove mapped Domaim pages from Dom0 physmap */
+	for (i = 0; i < nr_pages; i++) {
+		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
+		if (rc < 0) {
+			LOG_DBG("Failed to remove page from physmap %ld",
+					mapped_pfns[i]);
+			break;
+		}
+	}
+
+	/*
+	 * After this Dom0 will have memory hole in mapped_domu address,
+	 * needed to populate memory on this address before freeing.
+	 */
+	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
+	if (rc < 0) {
+		LOG_ERR("Return code = %d XENMEM_populate_physmap", rc);
+	}
+
+	return rc;
+}
+
+static int xen_put_mapping_pfns(int nr_pages, void *mapped_addr)
+{
+	int rc;
+
+	rc = xen_rm_pages_from_physmap(nr_pages, mapped_addr);
+
+	k_free(mapped_addr);
+	return rc;
+}
+
+static int xen_get_mapping_pfns(int domid, uint64_t nr_pages,
+				   xen_pfn_t base_pfn, void **mapped_addr)
+{
+	int i, rc, ret;
+	uint64_t mapped_addr_pfn;
+	xen_pfn_t mapped_pfns[DOMAIN_PAGES_MAX];
+	xen_pfn_t indexes[DOMAIN_PAGES_MAX];
+	int err_codes[DOMAIN_PAGES_MAX];
+	void *addr;
+
+	__ASSERT(nr_pages < DOMAIN_PAGES_MAX, "Too may pages requested");
+
+	addr = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	if (!addr)
+		return -ENOMEM;
+
+	LOG_INF("DOM(%d): Allocated %llu pages (%llu), mapped_addr = %p", domid,
+			nr_pages, XEN_PAGE_SIZE * nr_pages, addr);
+	memset(addr, 0, XEN_PAGE_SIZE * nr_pages);
+
+	rc = xen_rm_pages_from_physmap(nr_pages, addr);
+	if (rc < 0) {
+		goto err;
+	}
+
+	mapped_addr_pfn = xen_virt_to_gfn((uint64_t)addr);
+
+	for (i = 0; i < nr_pages; i++) {
+		mapped_pfns[i] = mapped_addr_pfn + i;
+		indexes[i] = base_pfn + i;
+	}
+
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid,
+			  XENMAPSPACE_gmfn_foreign, nr_pages,
+			  indexes, mapped_pfns, err_codes);
+	if (rc < 0) {
+		goto err;
+	}
+
+	*mapped_addr = addr;
+	return rc;
+err:
+	ret = xen_put_mapping_pfns(nr_pages, addr);
+	if (ret) {
+		LOG_ERR("Unable to free resources rc = %d", ret);
+	}
+
+	return rc;
+}
+
+void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
+			  const char *dtb_end)
+{
+	int rc;
 	void *mapped_dtb;
 	uint64_t mapped_dtb_pfn, dtb_pfn = XEN_PHYS_PFN(dtb_addr);
 	uint64_t dtb_size = dtb_end - dtb_start;
 	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
-	xen_pfn_t mapped_pfns[nr_pages];
-	xen_pfn_t indexes[nr_pages];
-	int err_codes[nr_pages];
 	struct xen_domctl_cacheflush cacheflush;
 
-	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	if (!mapped_dtb)
+	rc = xen_get_mapping_pfns(domid, nr_pages, dtb_pfn, &mapped_dtb);
+	LOG_DBG("Return code for xen_get_mapping_pfns = %d\n", rc);
+	if (rc < 0) {
 		return;
-
-	mapped_dtb_pfn = xen_virt_to_gfn((uint64_t)mapped_dtb);
-
-	for (i = 0; i < nr_pages; i++) {
-		mapped_pfns[i] = mapped_dtb_pfn + i;
-		indexes[i] = dtb_pfn + i;
 	}
 
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
-					 indexes, mapped_pfns, err_codes);
-	LOG_DBG("Return code for XENMEM_add_to_physmap_batch = %d", rc);
-	if (rc < 0)
-		goto out;
+	mapped_dtb_pfn = xen_virt_to_gfn((uint64_t)mapped_dtb);
 
 	LOG_DBG("DTB start addr = %p, end addr = %p, binary size = 0x%llx", dtb_start,
 	       dtb_end, dtb_size);
@@ -313,41 +399,23 @@ void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *d
 	rc = xen_domctl_cacheflush(0, &cacheflush);
 	LOG_DBG("Return code for xen_domctl_cacheflush = %d", rc);
 
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_pages; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
-		if (rc < 0) {
-			LOG_ERR("Error while removing physmap (rc=%d)", rc);
-			goto out;
-		}
+	rc = xen_put_mapping_pfns(nr_pages, mapped_dtb);
+	if (rc < 0) {
+		LOG_ERR("%d: xen_put_mapping_pfns rc = %d\n", __LINE__, rc);
 	}
-
-	/*
-	 * After this Dom0 will have memory hole in mapped_domu address,
-	 * needed to populate memory on this address before freeing.
-	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
-	if (rc < 0)
-		LOG_ERR("Return code = %d XENMEM_populate_physmap", rc);
-
- out:
-	k_free(mapped_dtb);
 }
 
 int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 				 struct xen_domain_cfg *domcfg, struct modules_address *modules)
 {
-	int i, rc;
-	void *mapped_domd;
+	int rc, ret;
+	void *mapped_domd = NULL;
 	uint64_t mapped_base_pfn;
 	uint64_t dtb_addr;
 	const char *img_start = domcfg->img_start + image_load_offset;
 	const char *img_end = domcfg->img_end;
 	uint64_t domd_size = img_end - img_start;
 	uint64_t nr_pages = ceiling_fraction(domd_size, XEN_PAGE_SIZE);
-	xen_pfn_t mapped_pfns[nr_pages];
-	xen_pfn_t indexes[nr_pages];
-	int err_codes[nr_pages];
 	char *fdt;
 	size_t fdt_size;
 
@@ -377,26 +445,13 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 
 	load_dtb(domid, dtb_addr, fdt, fdt + fdt_size);
 
-	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-
-	if (mapped_domd == NULL)
-		return 0;
-
-	LOG_INF("Allocated %llu pages (%llu), mapped_domd = %p",
-		   nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
-	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
-	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
-
-	for (i = 0; i < nr_pages; i++) {
-		mapped_pfns[i] = mapped_base_pfn + i;
-		indexes[i] = base_pfn + i;
+	rc = xen_get_mapping_pfns(domid, nr_pages, base_pfn, &mapped_domd);
+	LOG_DBG("Return code for xen_get_mapping_pfns = %d\n", rc);
+	if (rc < 0) {
+		return rc;
 	}
 
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
-					 indexes, mapped_pfns, err_codes);
-	LOG_DBG("Return code for XENMEM_add_to_physmap_batch = %d", rc);
-	if (rc < 0)
-		goto out;
+	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
 
 	LOG_DBG("Zephyr DomD start addr = %p, end addr = %p size = 0x%llx",
 	       img_start, img_end, domd_size);
@@ -410,27 +465,17 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	rc = xen_domctl_cacheflush(0, &cacheflush);
 	LOG_DBG("Return code for xen_domctl_cacheflush = %d", rc);
 
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_pages; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
-		if (rc < 0)
-			goto out;
+	ret = xen_put_mapping_pfns(nr_pages, mapped_domd);
+	if (ret < 0) {
+		LOG_ERR("Error freeing resources, rc = %d", ret);
+		return ret;
 	}
 
-	/*
-	 * After this Dom0 will have memory hole in mapped_domd address,
-	 * needed to populate memory on this address before freeing.
-	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
-	LOG_DBG("Return code = %d XENMEM_populate_physmap", rc);
-	if (rc < 0)
-		goto out;
-
-	/* .text start address in domU memory */
-	modules->ventry = base_addr + zhdr->text_offset;
-	rc = 0;
- out:
-	k_free(mapped_domd);
+	if (rc >= 0) {
+		/* .text start address in domU memory */
+		modules->ventry = base_addr + zhdr->text_offset;
+		rc = 0;
+	}
 
 	return rc;
 }
