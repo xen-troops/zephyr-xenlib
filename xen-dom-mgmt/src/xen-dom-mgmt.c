@@ -467,8 +467,8 @@ static int probe_zimage(int domid, uint64_t base_addr,
 }
 
 
-int probe_uimage(int domid, struct xen_domain_cfg *domcfg,
-				 struct modules_address *modules)
+static int probe_uimage(int domid, struct xen_domain_cfg *domcfg,
+			struct modules_address *modules)
 {
 	int rc;
 	uint32_t len;
@@ -510,8 +510,8 @@ int probe_uimage(int domid, struct xen_domain_cfg *domcfg,
 	return probe_zimage(domid, base_addr, sizeof(uhdr), domcfg, modules);
 }
 
-int load_modules(int domid, struct xen_domain_cfg *domcfg,
-				 struct modules_address *modules)
+static int load_modules(int domid, struct xen_domain_cfg *domcfg,
+			 struct modules_address *modules)
 {
 	int rc;
 	uint64_t base_addr = GUEST_RAM0_BASE;
@@ -535,7 +535,8 @@ int load_modules(int domid, struct xen_domain_cfg *domcfg,
 	return 0;
 }
 
-int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem)
+static int share_domain_iomems(int domid, struct xen_domain_iomem *iomems,
+			       int nr_iomem)
 {
 	int i, rc = 0;
 
@@ -563,7 +564,7 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 	return rc;
 }
 
-int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
+static int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 {
 	int i, rc = 0;
 
@@ -578,7 +579,7 @@ int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 	return rc;
 }
 
-int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
+static int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
 {
 	int i, rc = 0;
 
@@ -612,7 +613,9 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 	return NULL;
 }
 
-void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, const struct xen_domain *domain)
+static void initialize_xenstore(uint32_t domid,
+				const struct xen_domain_cfg *domcfg,
+				const struct xen_domain *domain)
 {
 	char lbuffer[256] = { 0 };
 	char rbuffer[256] = { 0 };
