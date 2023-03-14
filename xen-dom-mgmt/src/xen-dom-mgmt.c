@@ -688,7 +688,6 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	int rc = 0;
 	struct xen_domctl_createdomain config;
 	struct vcpu_guest_context vcpu_ctx;
-	struct xen_domctl_scheduler_op sched_op;
 	struct xen_domain *domain;
 	char *domdtdevs;
 	struct modules_address modules = {0};
@@ -699,52 +698,85 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 
 	domdtdevs = domcfg->dtdevs;
-
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
 	config.grant_opts = XEN_DOMCTL_GRANT_version(1);
-
 	rc = xen_domctl_createdomain(domid, &config);
-	LOG_DBG("Return code = %d creation", rc);
 	if (rc) {
+		LOG_ERR("Failed to create domain#%u (rc=%d)", domid, rc);
 		return rc;
 	}
 
 	domain = k_malloc(sizeof(*domain));
-	__ASSERT(domain, "Can not allocate memory for domain struct");
+	if (domain == NULL) {
+		LOG_ERR("Can not allocate memory for domain#%u struct", domid);
+		goto destroy_domain;
+	}
 	memset(domain, 0, sizeof(*domain));
 	domain->domid = domid;
 
 	rc = xen_domctl_max_vcpus(domid, domcfg->max_vcpus);
-	LOG_DBG("Return code = %d max_vcpus", rc);
+	if (rc) {
+		LOG_ERR("Failed to set max vcpus for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 	domain->num_vcpus = domcfg->max_vcpus;
 
 	rc = xen_domctl_set_address_size(domid, 64);
-	LOG_DBG("Return code = %d set_address_size", rc);
+	if (rc) {
+		LOG_ERR("Failed to set adress size for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 	domain->address_size = 64;
 
 	domain->max_mem_kb = domcfg->mem_kb + (domcfg->gnt_frames + NR_MAGIC_PAGES) * XEN_PAGE_SIZE;
 	rc = xen_domctl_max_mem(domid, domain->max_mem_kb);
+	if (rc) {
+		LOG_ERR("Failed to set max memory for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	/* Calculation according to xl.cfg manual for shadow memory (1MB/CPU + 8KB for every 1MB RAM */
 	rc = xen_domctl_set_paging_mempool_size(domid, domcfg->max_vcpus * 1024 * 1024 + 8 * domcfg->mem_kb);
-	LOG_DBG("Return code = %d xen_domctl_set_paging_mempool_size", rc);
+	if (rc) {
+		LOG_ERR("Failed to set paging mempool size for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	rc = allocate_domain_evtchns(domain);
-	LOG_DBG("Return code = %d allocate_domain_evtchns", rc);
+	if (rc) {
+		LOG_ERR("Failed to allocate event channel for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	rc = load_modules(domid, domcfg, &modules);
-	if (rc || modules.ventry == NULL)
-	{
-		LOG_ERR("Unable to load image, insufficient memory");
-		return 10;
+	if (rc) {
+		LOG_ERR("Unable to load image for domain#%u, insufficient memory (rc=%d)", domid, rc);
+		goto domain_free;
+	}
+	if (!modules.ventry) {
+		LOG_ERR("Modules ventry is not set");
+		rc = -EINVAL;
+		goto domain_free;
 	}
 
 	rc = share_domain_iomems(domid, domcfg->iomems, domcfg->nr_iomems);
+	if (rc) {
+		LOG_ERR("Unable to share domain#%u iomems (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	rc = bind_domain_irqs(domid, domcfg->irqs, domcfg->nr_irqs);
+	if (rc) {
+		LOG_ERR("Failed to bind irq for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	rc = assign_dtdevs(domid, domdtdevs, domcfg->nr_dtdevs);
+	if (rc) {
+		LOG_ERR("Failed to assign dtdevs for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
 	vcpu_ctx.user_regs.x0 = modules.dtb_addr;
@@ -754,56 +786,52 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	vcpu_ctx.flags = VGCF_online;
 
 	rc = xen_domctl_setvcpucontext(domid, 0, &vcpu_ctx);
-	LOG_DBG("Set VCPU context return code = %d", rc);
-
-	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
-	rc = xen_domctl_getvcpucontext(domid, 0, &vcpu_ctx);
-	LOG_DBG("Return code = %d getvcpucontext", rc);
-	LOG_INF("VCPU PC = 0x%llx, x0 = 0x%llx, x1 = %llx", vcpu_ctx.user_regs.pc64,
-	       vcpu_ctx.user_regs.x0, vcpu_ctx.user_regs.x1);
-
-	memset(&sched_op, 0, sizeof(sched_op));
-	sched_op.sched_id = XEN_SCHEDULER_CREDIT2;
-	sched_op.cmd = XEN_DOMCTL_SCHEDOP_getinfo;
-
-	rc = xen_domctl_scheduler_op(domid, &sched_op);
-	LOG_DBG("Return code = %d SCHEDOP_getinfo", rc);
-
-	sched_op.u.credit2.cap = 0;
-	sched_op.u.credit2.weight = 256;
-	sched_op.cmd = XEN_DOMCTL_SCHEDOP_putinfo;
-
-	rc = xen_domctl_scheduler_op(domid, &sched_op);
-	LOG_DBG("Return code = %d SCHEDOP_putinfo", rc);
-
-	k_mutex_lock(&dl_mutex, K_FOREVER);
-	sys_dnode_init(&domain->node);
-	sys_dlist_append(&domain_list, &domain->node);
-	k_mutex_unlock(&dl_mutex);
+	if (rc) {
+		LOG_ERR("Failed to set VCPU context for domain#%u (rc=%d)", domid, rc);
+		goto domain_free;
+	}
 
 	rc = start_domain_stored(domain);
 	if (rc) {
-		return rc;
+		LOG_ERR("Failed to start domain#%u stored (rc=%d)", domid, rc);
+		goto domain_free;
 	}
 
 
 	rc = xen_start_domain_console(domain);
-
 	if (rc) {
-		LOG_ERR("Unable to start domain console (rc=%d)", rc);
-		return rc;
+		LOG_ERR("Failed to start domain#%u console (rc=%d)", domid, rc);
+		goto free_domain_stored;
 	}
 
 	initialize_xenstore(domid, domcfg, domain);
 
 	if (domid == DOMID_DOMD) {
 		rc = xen_domctl_unpausedomain(domid);
-		LOG_INF("Return code = %d XEN_DOMCTL_unpausedomain", rc);
+		if (rc) {
+			LOG_ERR("Failed to unpause domain#%u (rc=%d)", domid, rc);
+			goto stop_domain_console;
+		}
 	} else {
 		LOG_INF("Created domain is paused\nTo unpause issue: xu unpause -d %u", domid);
 	}
 
+	k_mutex_lock(&dl_mutex, K_FOREVER);
+	sys_dnode_init(&domain->node);
+	sys_dlist_append(&domain_list, &domain->node);
 	++dom_num;
+	k_mutex_unlock(&dl_mutex);
+
+	return rc;
+
+stop_domain_console:
+	xen_stop_domain_console(domain);
+free_domain_stored:
+	stop_domain_stored(domain);
+domain_free:
+	k_free(domain);
+destroy_domain:
+	xen_domctl_destroydomain(domid);
 
 	return rc;
 }
