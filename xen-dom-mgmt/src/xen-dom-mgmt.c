@@ -356,7 +356,9 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	struct xen_domctl_cacheflush cacheflush;
 
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
-	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
+	uint64_t load_addr = base_addr + zhdr->text_offset;
+	uint64_t load_pfn = XEN_PHYS_PFN(load_addr);
+
 	LOG_DBG("zImage header info: text_offset = %llx,"
 		   "base_addr = %llx, pages = %llu size = %llu",
 		   zhdr->text_offset, base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
@@ -370,7 +372,7 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 		return (rc) ? rc : -ENOMEM;
 	}
 
-	dtb_addr = get_dtb_addr(base_addr, KB(domcfg->mem_kb), base_addr,
+	dtb_addr = get_dtb_addr(base_addr, KB(domcfg->mem_kb), load_addr,
 				 domcfg->img_end - domcfg->img_start, fdt_size);
 	if (!dtb_addr)
 		return -ENOMEM;
@@ -391,7 +393,7 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
-		indexes[i] = base_pfn + i;
+		indexes[i] = load_pfn + i;
 	}
 
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
@@ -429,7 +431,7 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 		goto out;
 
 	/* .text start address in domU memory */
-	modules->ventry = base_addr + zhdr->text_offset;
+	modules->ventry = load_addr;
 	rc = 0;
  out:
 	k_free(mapped_domd);
