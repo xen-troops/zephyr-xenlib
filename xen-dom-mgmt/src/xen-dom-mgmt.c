@@ -212,8 +212,8 @@ static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
 	const uint64_t modsize = dtb_len;
 	uint64_t modbase;
 
-	LOG_INF("rambase = %llu, ramsize = %llu", rambase, ramsize);
-	LOG_INF("kernbase = %llu kernsize = %llu, dtbsize = %llu",
+	LOG_INF("rambase = %llx, ramsize = %llu", rambase, ramsize);
+	LOG_INF("kernbase = %llx kernsize = %llu, dtbsize = %llu",
 		   kernbase, kernsize, dtbsize);
 	LOG_INF("kernsize_aligned = %lld", kernsize_aligned);
 
