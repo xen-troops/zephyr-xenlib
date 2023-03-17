@@ -29,6 +29,7 @@
 
 #include "domain.h"
 #include "xen-dom-fdt.h"
+#include "mem-mgmt.h"
 
 #include <xenstore_srv.h>
 #include <xen_shell.h>
@@ -126,75 +127,95 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 
 static int allocate_magic_pages(int domid)
 {
-	int rc, i;
-	uint64_t nr_exts = NR_MAGIC_PAGES;
-	xen_pfn_t magic_base_pfn = XEN_PHYS_PFN(GUEST_MAGIC_BASE);
-	xen_pfn_t extents[nr_exts];
+	int rc = -ENOMEM, err_cache_flush = 0;
 	void *mapped_magic;
-	xen_pfn_t mapped_base_pfn, mapped_pfns[nr_exts];
-	int err_codes[nr_exts];
-	struct xen_domctl_cacheflush cacheflush;
+	uint64_t populated_gfn;
 
-	for (i = 0; i < nr_exts; i++) {
-		extents[i] = magic_base_pfn + i;
-	}
-	rc = xendom_populate_physmap(domid, 0, nr_exts, 0, extents);
-
-	/* Need to clear memory content of magic pages */
-	mapped_magic = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_exts);
-	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_magic);
-	for (i = 0; i < nr_exts; i++) {
-		mapped_pfns[i] = mapped_base_pfn + i;
-	}
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_exts,
-					 extents, mapped_pfns, err_codes);
-
-	memset(mapped_magic, 0, XEN_PAGE_SIZE * nr_exts);
-
-	cacheflush.start_pfn = mapped_base_pfn;
-	cacheflush.nr_pfns = nr_exts;
-	rc = xen_domctl_cacheflush(0, &cacheflush);
-	LOG_DBG("Return code for xen_domctl_cacheflush = %d", rc);
-
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_exts; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
+	populated_gfn = xenmem_populate_physmap(domid,
+						XEN_PHYS_PFN(GUEST_MAGIC_BASE),
+						PFN_4K_SHIFT,
+						NR_MAGIC_PAGES);
+	if (populated_gfn != NR_MAGIC_PAGES) {
+		LOG_ERR("Failed to populate magic pages for domid#%d (ret=%llu expected=%u)",
+			domid, populated_gfn, NR_MAGIC_PAGES);
+			return rc;
 	}
 
+	rc = xenmem_map_region(domid, NR_MAGIC_PAGES,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE), &mapped_magic);
+	if (rc) {
+		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
+		return rc;
+	}
+
+	memset(mapped_magic, 0, XEN_PAGE_SIZE * NR_MAGIC_PAGES);
 	/*
-	 * After this Dom0 will have memory hole in mapped_magic address,
-	 * needed to populate memory on this address before freeing.
+	 * This is not critical, so try to restore memory to dom0
+	 * and then return error code.
 	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_exts, 0, mapped_pfns);
-	LOG_DBG("XENMEM_populate_physmap return code = %d", rc);
+	rc = xenmem_cacheflush_mapped_pfns(NR_MAGIC_PAGES,
+					   XEN_PHYS_PFN(GUEST_MAGIC_BASE));
+	if (rc) {
+		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
+			domid, rc);
+		err_cache_flush = rc;
+	}
 
-	k_free(mapped_magic);
+	rc = xenmem_unmap_region(NR_MAGIC_PAGES, mapped_magic);
+	if (rc) {
+		LOG_ERR("Failed to unmap memory for domid#%d (rc=%d)",
+			domid, rc);
+	}
+	/*
+	 * We postponed this to unmap DomU magic region as we failed to
+	 * flush cache for domain pages. We need to leave now to prevent
+	 * DomU from using dirty pages passed with HVM params.
+	 */
+	if (err_cache_flush) {
+		return err_cache_flush;
+	}
 
-	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid, magic_base_pfn + CONSOLE_PFN_OFFSET);
-	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid, magic_base_pfn + XENSTORE_PFN_OFFSET);
+	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
+			       CONSOLE_PFN_OFFSET);
+	if (rc) {
+		LOG_ERR("Failed to set HVM_PARAM_CONSOLE_PFN for domid#%d (rc=%d)",
+			domid, rc);
+		return rc;
+	}
+
+	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
+			       XENSTORE_PFN_OFFSET);
+	if (rc) {
+		LOG_ERR("Failed to set HVM_PARAM_STORE_PFN for domid#%d (rc=%d)",
+			domid, rc);
+	}
 
 	return rc;
 }
 
-/* Xen can populate physmap with different extent size, we are using 4K and 2M */
-#define EXTENT_2M_SIZE_KB 2048
-#define EXTENT_2M_PFN_SHIFT 9
 /* We need to populate magic pages and memory map here */
 static int prepare_domain_physmap(int domid, uint64_t base_pfn, struct xen_domain_cfg *cfg)
 {
-	int i, rc;
-	uint64_t nr_mem_exts = ceiling_fraction(cfg->mem_kb, EXTENT_2M_SIZE_KB);
-	xen_pfn_t mem_extents[nr_mem_exts];
+	int rc;
+	uint64_t populated_gfn;
+	uint64_t nr_mem_exts =
+		ceiling_fraction(cfg->mem_kb * 1024, PFN_2M_SIZE);
 
-	allocate_magic_pages(domid);
-
-	for (i = 0; i < nr_mem_exts; i++) {
-		mem_extents[i] = base_pfn + (i << EXTENT_2M_PFN_SHIFT);
+	rc = allocate_magic_pages(domid);
+	if (rc) {
+		LOG_ERR("Failed to allocate magic pages for domid#%d (rc=%d)",
+			domid, rc);
+		return rc;
 	}
-	rc = xendom_populate_physmap(domid, EXTENT_2M_PFN_SHIFT, nr_mem_exts, 0, mem_extents);
-	if (rc != nr_mem_exts) {
-		LOG_ERR("Error while populating %llu mem exts for domain#%u (rc=%d)", nr_mem_exts,
-		       domid, rc);
+
+	populated_gfn = xenmem_populate_physmap(domid, base_pfn, PFN_2M_SHIFT,
+						nr_mem_exts);
+	if (populated_gfn != nr_mem_exts) {
+		LOG_ERR("Failed to populate physmap for domid#%d (populated only %llu instead of %llu)",
+			domid, populated_gfn, nr_mem_exts);
+		return -ENOMEM;
 	}
 
 	return 0;
@@ -274,95 +295,78 @@ static uint64_t get_dtb_addr(uint64_t rambase, uint64_t ramsize,
 	return modbase;
 };
 
-void load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
+static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
+		    const char *dtb_end)
 {
-	int i, rc;
-	void *mapped_dtb;
-	uint64_t mapped_dtb_pfn, dtb_pfn = XEN_PHYS_PFN(dtb_addr);
+	void *mapped_dtb_addr;
+	int rc, err_cache_flush = 0;
 	uint64_t dtb_size = dtb_end - dtb_start;
 	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
-	xen_pfn_t mapped_pfns[nr_pages];
-	xen_pfn_t indexes[nr_pages];
-	int err_codes[nr_pages];
-	struct xen_domctl_cacheflush cacheflush;
+	uint64_t dtb_pfn;
 
-	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	if (!mapped_dtb)
-		return;
-
-	mapped_dtb_pfn = xen_virt_to_gfn((uint64_t)mapped_dtb);
-
-	for (i = 0; i < nr_pages; i++) {
-		mapped_pfns[i] = mapped_dtb_pfn + i;
-		indexes[i] = dtb_pfn + i;
+	rc = xenmem_map_region(domid, nr_pages,
+				XEN_PHYS_PFN(dtb_addr), &mapped_dtb_addr);
+	if (rc) {
+		LOG_ERR("Failed to map domain dtb region to Dom0 (rc=%d)", rc);
+		return rc;
 	}
 
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
-					 indexes, mapped_pfns, err_codes);
-	LOG_DBG("Return code for XENMEM_add_to_physmap_batch = %d", rc);
-	if (rc < 0)
-		goto out;
-
+	dtb_pfn = XEN_PHYS_PFN((uint64_t)mapped_dtb_addr);
 	LOG_DBG("DTB start addr = %p, end addr = %p, binary size = 0x%llx", dtb_start,
 	       dtb_end, dtb_size);
 	LOG_INF("DTB will be placed on addr = %p", (void *)dtb_addr);
 
-	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_dtb, dtb_start, dtb_size);
-
-	cacheflush.start_pfn = mapped_dtb_pfn;
-	cacheflush.nr_pfns = nr_pages;
-	rc = xen_domctl_cacheflush(0, &cacheflush);
-	LOG_DBG("Return code for xen_domctl_cacheflush = %d", rc);
-
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_pages; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
-		if (rc < 0) {
-			LOG_ERR("Error while removing physmap (rc=%d)", rc);
-			goto out;
-		}
+	/* Copy binary to domain pages and flush cache */
+	memcpy(mapped_dtb_addr, dtb_start, dtb_size);
+	/*
+	 * This is not critical, so try to restore memory to dom0
+	 * and then return error code.
+	 */
+	rc = xenmem_cacheflush_mapped_pfns(nr_pages, dtb_pfn);
+	if (rc) {
+		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
+			domid, rc);
+		err_cache_flush = rc;
 	}
 
+	rc = xenmem_unmap_region(nr_pages, mapped_dtb_addr);
+	if (rc) {
+		LOG_ERR("Failed to unmap memory for domid#%d (rc=%d)",
+			domid, rc);
+	}
 	/*
-	 * After this Dom0 will have memory hole in mapped_domu address,
-	 * needed to populate memory on this address before freeing.
+	 * We postponed this to unmap DomU memory region as we failed to flush
+	 * cache for domain pages. We need to return error code to prevent
+	 * DomU from using dirty pages for DTB.
 	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
-	if (rc < 0)
-		LOG_ERR("Return code = %d XENMEM_populate_physmap", rc);
+	if (err_cache_flush) {
+		return err_cache_flush;
+	}
 
- out:
-	k_free(mapped_dtb);
+	return rc;
 }
 
-int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
-				 struct xen_domain_cfg *domcfg, struct modules_address *modules)
+static int probe_zimage(int domid, uint64_t base_addr,
+			uint64_t image_load_offset,
+			struct xen_domain_cfg *domcfg,
+			struct modules_address *modules)
 {
-	int i, rc;
+	int rc, err_cache_flush = 0;
 	void *mapped_domd;
-	uint64_t mapped_base_pfn;
 	uint64_t dtb_addr;
 	const char *img_start = domcfg->img_start + image_load_offset;
 	const char *img_end = domcfg->img_end;
 	uint64_t domd_size = img_end - img_start;
 	uint64_t nr_pages = ceiling_fraction(domd_size, XEN_PAGE_SIZE);
-	xen_pfn_t mapped_pfns[nr_pages];
-	xen_pfn_t indexes[nr_pages];
-	int err_codes[nr_pages];
 	char *fdt;
 	size_t fdt_size;
-
-	struct xen_domctl_cacheflush cacheflush;
-
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
 	uint64_t load_addr = base_addr + zhdr->text_offset;
-	uint64_t load_pfn = XEN_PHYS_PFN(load_addr);
+	uint64_t load_gfn = XEN_PHYS_PFN(load_addr), base_pfn;
 
-	LOG_DBG("zImage header info: text_offset = %llx,"
-		   "base_addr = %llx, pages = %llu size = %llu",
-		   zhdr->text_offset, base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
-
+	LOG_DBG("zImage header info: text_offset = %llx, base_addr = %llx, pages = %llu size = %llu",
+		zhdr->text_offset, base_addr, nr_pages,
+		nr_pages * XEN_PAGE_SIZE);
 	rc = gen_domain_fdt(domcfg, (void **)&fdt, &fdt_size,
 			   XEN_VERSION_MAJOR, XEN_VERSION_MINOR,
 			   (void *)domcfg->dtb_start,
@@ -373,70 +377,61 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	}
 
 	dtb_addr = get_dtb_addr(base_addr, KB(domcfg->mem_kb), load_addr,
-				 domcfg->img_end - domcfg->img_start, fdt_size);
+				domcfg->img_end - domcfg->img_start, fdt_size);
 	if (!dtb_addr) {
+		LOG_ERR("Failed to get dtb addr for domid#%d", domid);
 		goto out_dtb;
 	}
 
 	modules->dtb_addr = dtb_addr;
-
-	load_dtb(domid, dtb_addr, fdt, fdt + fdt_size);
-
-	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-
-	if (mapped_domd == NULL) {
+	rc = load_dtb(domid, dtb_addr, fdt, fdt + fdt_size);
+	if (rc) {
+		LOG_ERR("Failed to load dtb dor domid#%d (rc=%d)", domid, rc);
 		goto out_dtb;
 	}
 
-	LOG_INF("Allocated %llu pages (%llu), mapped_domd = %p",
-		   nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
-	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
-	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
-
-	for (i = 0; i < nr_pages; i++) {
-		mapped_pfns[i] = mapped_base_pfn + i;
-		indexes[i] = load_pfn + i;
+	rc = xenmem_map_region(domid, nr_pages, load_gfn, &mapped_domd);
+	if (rc) {
+		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
+		goto out_dtb;
 	}
-
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
-					 indexes, mapped_pfns, err_codes);
-	LOG_DBG("Return code for XENMEM_add_to_physmap_batch = %d", rc);
-	if (rc < 0)
-		goto out;
-
+	base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
 	LOG_DBG("Zephyr DomD start addr = %p, end addr = %p size = 0x%llx",
-	       img_start, img_end, domd_size);
+		img_start, img_end, domd_size);
 
 	/* Copy binary to domain pages and clear cache */
 	memcpy(mapped_domd, img_start, domd_size);
 	LOG_DBG("Kernel image is copied");
-
-	cacheflush.start_pfn = mapped_base_pfn;
-	cacheflush.nr_pfns = nr_pages;
-	rc = xen_domctl_cacheflush(0, &cacheflush);
-	LOG_DBG("Return code for xen_domctl_cacheflush = %d", rc);
-
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
-	for (i = 0; i < nr_pages; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
-		if (rc < 0)
-			goto out;
+	/*
+	 * This is not critical, so try to restore memory to dom0
+	 * and then return error code.
+	 */
+	rc = xenmem_cacheflush_mapped_pfns(nr_pages, base_pfn);
+	if (rc) {
+		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
+			domid, rc);
+		err_cache_flush = rc;
 	}
 
+	rc = xenmem_unmap_region(nr_pages, mapped_domd);
+	if (rc) {
+		LOG_ERR("Failed to unmap memory for domid#%d (rc=%d)",
+			domid, rc);
+		goto out_dtb;
+	}
 	/*
-	 * After this Dom0 will have memory hole in mapped_domd address,
-	 * needed to populate memory on this address before freeing.
+	 * We postponed this to unmap DomU memory region as we failed to flush
+	 * cache for domain pages. We need to return error code to prevent
+	 * DomU from using dirty pages.
 	 */
-	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
-	LOG_DBG("Return code = %d XENMEM_populate_physmap", rc);
-	if (rc < 0)
-		goto out;
+	if (err_cache_flush) {
+		rc = err_cache_flush;
+		goto out_dtb;
+	}
 
 	/* .text start address in domU memory */
 	modules->ventry = load_addr;
 	rc = 0;
- out:
-	k_free(mapped_domd);
  out_dtb:
 	free_domain_fdt(fdt);
 
