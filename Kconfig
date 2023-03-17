@@ -39,3 +39,10 @@ config XEN_VCH
 	bool "Enable Xen vchannels support"
 	help
 	  Enable vchannel communication library.
+
+config PFN_CHUNK_SIZE
+	int "Chunk size for memory mapping operations"
+	default 128
+	help
+	  Chunk size for helper functions for mapping/unmapping
+	  memory from guest domain to Dom0.
