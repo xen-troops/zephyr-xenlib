@@ -42,8 +42,6 @@ LOG_MODULE_DECLARE(xen_dom_mgmt);
 #define CONFIG_PARTIAL_DEVICE_TREE_SIZE 8192
 #endif /* CONFIG_PARTIAL_DEVICE_TREE_SIZE */
 
-char fdt[CONFIG_PARTIAL_DEVICE_TREE_SIZE];
-
 typedef uint32_t gic_interrupt[3];
 
 static int fdt_property_compat(void *fdt, unsigned int nr_compat, ...)
@@ -793,6 +791,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 {
 	int rc = 0;
 	int fdt_size = CONFIG_PARTIAL_DEVICE_TREE_SIZE;
+	void *fdt;
 
 	if (pfdt)
 		if (check_fdt(pfdt, pfdt_size)) {
@@ -800,89 +799,121 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 			return -EINVAL;
 		}
 
+	fdt = k_aligned_alloc(XEN_PAGE_SIZE, fdt_size);
+	if (!fdt) {
+		LOG_ERR("Unable to allocate device-tree mem");
+		return -ENOMEM;
+	}
+
 	rc = fdt_create(fdt, fdt_size);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = fdt_finish_reservemap(fdt);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = fdt_begin_node(fdt, "");
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_root(xen_major, xen_minor, fdt);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_chosen(fdt, domcfg->cmdline);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_cpus(fdt, domcfg->max_vcpus);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_psci(fdt);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_memory(fdt, domcfg->mem_kb * 1024);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	switch (domcfg->gic_version) {
 	case XEN_DOMCTL_CONFIG_GIC_V2:
 		rc = create_gicv2(fdt);
-		if (rc < 0)
-			return fdt_to_errno(rc);
+		if (rc < 0) {
+			goto err;
+		}
 
 		break;
 	case XEN_DOMCTL_CONFIG_GIC_V3:
 		rc = create_gicv3(fdt);
-		if (rc < 0)
-			return fdt_to_errno(rc);
+		if (rc < 0) {
+			goto err;
+		}
 
 		break;
 	default:
 		LOG_ERR("Error: Unknown GIC version");
-		return -EINVAL;
+		rc = FDT_ERR_BADVALUE;
+		goto err;
 	}
 
 	/* We don't need to set timer frequency to be set right now*/
 	rc = create_timer(fdt, 0);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = create_hypervisor(fdt, xen_major, xen_minor, domcfg, domid);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	if (domcfg->tee_type == XEN_DOMCTL_CONFIG_TEE_OPTEE) {
 		rc = create_optee(fdt);
-		if (rc < 0)
-			return fdt_to_errno(rc);
+		if (rc < 0) {
+			goto err;
+		}
 	}
 
 	if (pfdt) {
 		rc = copy_pfdt(fdt, pfdt);
-		if (rc < 0)
-			return fdt_to_errno(rc);
+		if (rc < 0) {
+			goto err;
+		}
 	}
 
 	rc = fdt_end_node(fdt);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	rc = fdt_finish(fdt);
-	if (rc < 0)
-		return fdt_to_errno(rc);
+	if (rc < 0) {
+		goto err;
+	}
 
 	*fdtaddr = fdt;
 	*fdtsize = fdt_size;
 
 	return 0;
+ err:
+	k_free(fdt);
+
+	return fdt_to_errno(rc);
+}
+
+void free_domain_fdt(void *fdt)
+{
+	k_free(fdt);
 }
 #else /* CONFIG_XEN_LIBFDT */
 int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
@@ -894,4 +925,6 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 	*fdtsize = pfdt_size;
 	return 0;
 }
+
+void free_domain_fdt(void *fdt) {}
 #endif /* CONFIG_XEN_LIBFDT */
