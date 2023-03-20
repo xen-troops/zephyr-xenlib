@@ -779,6 +779,25 @@ static int copy_pfdt(void *fdt, void *pfdt)
 	return 0;
 }
 
+static int copy_dt_passthrough(void *fdt, void *pfdt, char **dt_passthrough,
+				uint32_t nr_dt_passthrough)
+{
+	int i;
+
+	for (i = 0; i < nr_dt_passthrough; i++) {
+		int r;
+
+		r = copy_node_by_path(dt_passthrough[i], fdt, pfdt);
+		if (r < 0 && r != -FDT_ERR_NOTFOUND) {
+			LOG_ERR("Can't copy the node \"%s\"",
+					dt_passthrough[i]);
+			return r;
+		}
+	}
+
+	return 0;
+}
+
 static inline int fdt_to_errno(int rc)
 {
 	LOG_ERR("DT create nodes failed: %d = %s", rc, fdt_strerror(rc));
@@ -888,6 +907,16 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 		rc = copy_pfdt(fdt, pfdt);
 		if (rc < 0) {
 			goto err;
+		}
+
+		if (domcfg->nr_dt_passthrough > 0
+			&& domcfg->dt_passthrough) {
+			rc = copy_dt_passthrough(fdt, pfdt,
+					  domcfg->dt_passthrough,
+					  domcfg->nr_dt_passthrough);
+			if (rc < 0) {
+				goto err;
+			}
 		}
 	}
 
