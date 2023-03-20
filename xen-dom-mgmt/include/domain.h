@@ -42,6 +42,9 @@ struct xen_domain_cfg {
 	char **dtdevs;
 	uint32_t nr_dtdevs;
 
+	char **dt_passthrough;
+	uint32_t nr_dt_passthrough;
+
 	char *cmdline;
 
 	const char *img_start, *img_end;
