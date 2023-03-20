@@ -371,43 +371,68 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	return 0;
 }
 
-/*
- * TODO: this function should not be called from anywhere except event channel
- * handler. Need to understand why notify_sibling_domains() works in such way
- * and fix it. Declaration is needed to avoid compiler warnings during build.
- */
-void xs_evtchn_cb(void *priv);
-
-//TODO: header, moveto dom0.c
-void notify_sibling_domains(uint32_t *sdom_list, size_t len)
+static void notify_watchers(const char *path, uint32_t caller_domid)
 {
-	struct xen_domain *iter;
+	struct watch_entry *iter;
+	struct pending_watch_event_entry *pentry;
 
-	for (size_t sdi=0;sdom_list[sdi];++sdi)
-	{
-		iter = domid_to_domain(sdom_list[sdi]);
-
-		if (iter)
-		{
-			xs_evtchn_cb((void*)iter);
+	k_mutex_lock(&wel_mutex, K_FOREVER);
+	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
+		if (iter->domain->domid == caller_domid ||
+		    strncmp(iter->key, path, strlen(iter->key))) {
+			continue;
 		}
+
+		pentry = k_malloc(sizeof(*pentry));
+		if (!pentry) {
+			goto pentry_fail;
+		}
+
+		pentry->key = k_malloc(strlen(path) + 1);
+		if (!pentry->key) {
+			goto pkey_fail;
+		}
+
+		strcpy(pentry->key, path);
+		pentry->domain = iter->domain;
+
+		sys_dnode_init(&pentry->node);
+		k_mutex_lock(&pfl_mutex, K_FOREVER);
+		sys_dlist_append(&pending_watch_event_list,
+				 &pentry->node);
+		k_mutex_unlock(&pfl_mutex);
+
+		/* Wake watcher thread up */
+		k_sem_give(&iter->domain->xb_sem);
+
 	}
+	k_mutex_unlock(&wel_mutex);
+
+	return;
+
+pkey_fail:
+	k_free(pentry);
+pentry_fail:
+	k_mutex_unlock(&wel_mutex);
+	LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
+		iter->domain->domid, path);
 }
 
 void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, char *payload,
 		   uint32_t len)
 {
+	char localpath[] = "/";
+	char path[STRING_LENGTH_MAX];
+	char *data;
 	uint32_t data_offset = strlen(payload) + 1;
-	char *data = payload + data_offset;
+
+	data = payload + data_offset;
 
 	if (len < data_offset) {
 		LOG_ERR("Data size mismatch");
 		send_errno(domain, id, EINVAL);
 		return;
 	}
-
-	const char localpath[] = "/";
-	char path[STRING_LENGTH_MAX];
 
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, data_offset);
@@ -420,43 +445,7 @@ void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, ch
 
 	send_reply(domain, id, msg_type, "OK");
 
-	struct watch_entry *iter;
-
-	uint32_t sibling_domains[DOM_MAX] = {0};
-	k_mutex_lock(&wel_mutex, K_FOREVER);
-	SYS_DLIST_FOR_EACH_CONTAINER (&watch_entry_list, iter, node) {
-		uint32_t iklen = strlen(iter->key);
-		if (memcmp(iter->key, path, iklen) == 0) {
-			struct pending_watch_event_entry *entry;
-			entry = k_malloc(sizeof(*entry));
-			size_t keyl = strlen(path) + 1;
-			entry->key = k_malloc(keyl);
-			memcpy(entry->key, path, keyl);
-			entry->key[keyl - 1] = 0;
-			entry->domid = iter->domid;
-
-			if (iter->domid != domain->domid)
-			{
-				for (size_t sdi=0;sdi<DOM_MAX;++sdi)
-				{
-					if (sibling_domains[sdi] == 0 || sibling_domains[sdi] == iter->domid)
-					{
-						sibling_domains[sdi] = iter->domid;
-						break;
-					}
-				}
-			}
-
-			k_mutex_lock(&pfl_mutex, K_FOREVER);
-			sys_dnode_init(&entry->node);
-			sys_dlist_append(&pending_watch_event_list, &entry->node);
-			k_mutex_unlock(&pfl_mutex);
-		}
-	}
-
-	k_mutex_unlock(&wel_mutex);
-
-	notify_sibling_domains(sibling_domains, DOM_MAX);
+	notify_watchers(path, domain->domid);
 }
 
 void handle_write(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
@@ -472,20 +461,24 @@ void handle_mkdir(struct xen_domain *domain, uint32_t id, char *payload, uint32_
 void process_pending_watch_events(struct xen_domain *domain, uint32_t id)
 {
 	struct pending_watch_event_entry *iter, *next;
-	k_mutex_lock(&pfl_mutex, K_FOREVER);
 
+	k_mutex_lock(&pfl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&pending_watch_event_list, iter, next, node) {
-		if (domain->domid == iter->domid && domain->running_transaction == 0 && fire_watcher(domain, id, iter->key)) {
-			if (domain->pending_stop_transaction == true && domain->stop_transaction_id == 0)
-			{
-				continue;
+		/* TODO: check and simplify this if statements if possible */
+		if (domain == iter->domain) {
+			if (domain->running_transaction == 0 &&
+			    fire_watcher(domain, id, iter->key)) {
+				if (domain->pending_stop_transaction == true &&
+				    domain->stop_transaction_id == 0) {
+					continue;
+				}
+
+				k_free(iter->key);
+				sys_dlist_remove(&iter->node);
+				k_free(iter);
 			}
-			k_free(iter->key);
-			sys_dlist_remove(&iter->node);
-			k_free(iter);
 		}
 	}
-
 	k_mutex_unlock(&pfl_mutex);
 }
 
@@ -611,55 +604,131 @@ void handle_watch(struct xen_domain *domain, uint32_t id, char *payload, uint32_
 	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
 	char token[STRING_LENGTH_MAX];
-	size_t plen = 0;
-	bool is_relative = memcmp(payload, localpath, strlen(localpath)) != 0;
-	for (; plen < len && payload[plen] != '\0'; ++plen)
-		;
-	plen += 1;
+	struct watch_entry *wentry;
+	struct pending_watch_event_entry *pentry;
+	size_t plen = 0, full_plen;
+	bool path_is_relative;
 
-	if (is_relative) {
-		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
+	path_is_relative = !!(memcmp(payload, localpath, strlen(localpath)));
+
+	/*
+	 * Path and token come inside payload char * and are separated
+	 * with '\0', so we can find path len with strnlen here.
+	 */
+	plen = strnlen(payload, len) + 1;
+	if (plen > STRING_LENGTH_MAX) {
+		goto path_fail;
+	}
+
+	if (path_is_relative) {
+		full_plen = snprintf(path, sizeof(path), "/local/domain/%d/%s",
+			 domain->domid, payload);
+		if (full_plen < 0) {
+			goto path_fail;
+		}
+
+		/* Add symbol for trailing '\0', skipped by snprintf */
+		full_plen++;
 	} else {
 		memcpy(path, payload, plen);
+		full_plen = plen;
 	}
 
+	/* Extract token value from payload (between 'path' and end '\0') */
 	memcpy(token, payload + plen, len - plen);
 
-	struct watch_entry *entry = key_to_watcher(path, true, token);
-	size_t lpath = strlen(path) + 1;
+	k_mutex_lock(&wel_mutex, K_FOREVER);
+	wentry = key_to_watcher(path, true, token);
 
-	if (!entry) {
-		entry = k_malloc(sizeof(*entry));
-		entry->key = k_malloc(lpath);
-		memcpy(entry->key, path, lpath);
-		entry->token = k_malloc(len - plen);
-		memcpy(entry->token, token, len - plen);
-		entry->domid = domain->domid;
+	if (wentry) {
+		/* Same watch, different path form */
+		wentry->is_relative = path_is_relative;
+		k_mutex_unlock(&wel_mutex);
+	} else {
+		/* Watch does not exist, create it */
+		k_mutex_unlock(&wel_mutex);
+
+		wentry = k_malloc(sizeof(*wentry));
+		if (!wentry) {
+			goto wentry_fail;
+		}
+
+		wentry->key = k_malloc(full_plen);
+		if (!wentry->key) {
+			goto wkey_fail;
+		}
+
+		wentry->token = k_malloc(len - plen);
+		if (!wentry->token) {
+			goto wtoken_fail;
+		}
+
+		memcpy(wentry->key, path, full_plen);
+		memcpy(wentry->token, token, len - plen);
+		wentry->domain = domain;
+		wentry->is_relative = path_is_relative;
+		sys_dnode_init(&wentry->node);
+
 		k_mutex_lock(&wel_mutex, K_FOREVER);
-		sys_dnode_init(&entry->node);
-		sys_dlist_append(&watch_entry_list, &entry->node);
+		sys_dlist_append(&watch_entry_list, &wentry->node);
 		k_mutex_unlock(&wel_mutex);
 	}
-
-	entry->is_relative = is_relative;
-
 	send_reply(domain, id, XS_WATCH, "OK");
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-
 	if (key_to_entry(path)) {
-		struct pending_watch_event_entry *entry;
-		entry = k_malloc(sizeof(*entry));
-		entry->key = k_malloc(lpath);
-		memcpy(entry->key, path, lpath);
-		entry->domid = domain->domid;
-		k_mutex_lock(&pfl_mutex, K_FOREVER);
-		sys_dnode_init(&entry->node);
-		sys_dlist_append(&pending_watch_event_list, &entry->node);
-		k_mutex_unlock(&pfl_mutex);
-	}
+		pentry = k_malloc(sizeof(*pentry));
+		if (!pentry) {
+			goto pentry_fail;
+		}
 
+		pentry->key = k_malloc(full_plen);
+		if (!pentry->key) {
+			goto pkey_fail;
+		}
+
+		memcpy(pentry->key, path, full_plen);
+		pentry->domain = domain;
+		sys_dnode_init(&pentry->node);
+
+		k_mutex_lock(&pfl_mutex, K_FOREVER);
+		sys_dlist_append(&pending_watch_event_list, &pentry->node);
+		k_mutex_unlock(&pfl_mutex);
+
+		/* Notify domain thread about new pending event */
+		k_sem_give(&domain->xb_sem);
+	}
 	k_mutex_unlock(&xsel_mutex);
+
+	return;
+
+path_fail:
+	LOG_ERR("Failed to add watch for %s, path is too long", payload);
+	send_reply(domain, id, XS_ERROR, "ENOMEM");
+
+	return;
+
+wtoken_fail:
+	k_free(wentry->key);
+wkey_fail:
+	k_free(wentry);
+wentry_fail:
+	LOG_WRN("Failed to create watch for Domain#%d, no memory",
+		domain->domid);
+	send_reply(domain, id, XS_ERROR, "ENOMEM");
+
+	return;
+
+pkey_fail:
+	k_free(pentry);
+pentry_fail:
+	k_mutex_unlock(&xsel_mutex);
+	/*
+	 * We can't notify domain that this file already exists,
+	 * so leave it without first WATCH_EVENT
+	 */
+	LOG_WRN("Failed to notify Domain#%d, no memory for event",
+		domain->domid);
 }
 
 void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
@@ -682,7 +751,7 @@ void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint3
 	struct watch_entry *entry = key_to_watcher(path, true, token);
 
 	if (entry) {
-		if (entry->domid == domain->domid) {
+		if (entry->domain == domain) {
 			k_mutex_lock(&wel_mutex, K_FOREVER);
 			remove_watch_entry(entry);
 			k_mutex_unlock(&wel_mutex);
@@ -793,6 +862,31 @@ int stop_domain_stored(struct xen_domain *domain)
 	return rc;
 }
 
+void cleanup_domain_watches(struct xen_domain *domain)
+{
+	struct watch_entry *iter, *next;
+	struct pending_watch_event_entry *pwe_iter, *pwe_next;
+
+	k_mutex_lock(&wel_mutex, K_FOREVER);
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&watch_entry_list, iter, next, node) {
+		if (iter->domain == domain) {
+			remove_watch_entry(iter);
+		}
+	}
+	k_mutex_unlock(&wel_mutex);
+
+	k_mutex_lock(&pfl_mutex, K_FOREVER);
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&pending_watch_event_list, pwe_iter,
+					  pwe_next, node) {
+		if (pwe_iter->domain == domain) {
+			sys_dlist_remove(&pwe_iter->node);
+			k_free(pwe_iter->key);
+			k_free(pwe_iter);
+		}
+	}
+	k_mutex_unlock(&pfl_mutex);
+}
+
 const struct message_handle message_handle_list[XS_TYPE_COUNT] = { [XS_CONTROL] = { handle_control },
 					    [XS_DIRECTORY] = { handle_directory },
 					    [XS_READ] = { handle_read },
@@ -887,6 +981,9 @@ void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 
 		notify_evtchn(domain->local_xenstore_evtchn);
 	}
+
+	/* Need to cleanup all watches and events before destroying */
+	cleanup_domain_watches(domain);
 }
 
 void init_root(void)
