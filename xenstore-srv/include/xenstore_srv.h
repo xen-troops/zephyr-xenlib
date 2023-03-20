@@ -21,7 +21,7 @@ struct xs_entry {
 struct watch_entry {
 	char *key;
 	char *token;
-	int domid;
+	struct xen_domain *domain;
 	bool is_relative;
 
 	sys_dnode_t node;
@@ -29,7 +29,7 @@ struct watch_entry {
 
 struct pending_watch_event_entry {
 	char *key;
-	int domid;
+	struct xen_domain *domain;
 
 	sys_dnode_t node;
 };
