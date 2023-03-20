@@ -12,4 +12,6 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 		size_t *fdtsize, int xen_major, int xen_minor, void *pfdt,
 		size_t pfdt_size, int domid);
 
+void free_domain_fdt(void *fdt);
+
 #endif /* XENLIB_XEN_DOM_FDT_H */

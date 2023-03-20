@@ -374,8 +374,9 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 
 	dtb_addr = get_dtb_addr(base_addr, KB(domcfg->mem_kb), load_addr,
 				 domcfg->img_end - domcfg->img_start, fdt_size);
-	if (!dtb_addr)
-		return -ENOMEM;
+	if (!dtb_addr) {
+		goto out_dtb;
+	}
 
 	modules->dtb_addr = dtb_addr;
 
@@ -383,8 +384,9 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 
 	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 
-	if (mapped_domd == NULL)
-		return 0;
+	if (mapped_domd == NULL) {
+		goto out_dtb;
+	}
 
 	LOG_INF("Allocated %llu pages (%llu), mapped_domd = %p",
 		   nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
@@ -435,6 +437,8 @@ int probe_zimage(int domid, uint64_t base_addr, uint64_t image_load_offset,
 	rc = 0;
  out:
 	k_free(mapped_domd);
+ out_dtb:
+	free_domain_fdt(fdt);
 
 	return rc;
 }
