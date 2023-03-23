@@ -22,12 +22,51 @@
 
 LOG_MODULE_REGISTER(xen_domain_console);
 
-static size_t stack_slots[DOM_MAX] = { 0 };
 /* One page is enough for anyone */
 #define XEN_CONSOLE_STACK_SIZE		4096
 
 static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
+
+static uint32_t used_threads;
+static K_MUTEX_DEFINE(global_console_lock);
+
+BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= DOM_MAX);
+
+/* Allocate one stack for external reader thread */
+static int get_stack_idx(void)
+{
+	int ret;
+
+	k_mutex_lock(&global_console_lock, K_FOREVER);
+
+	ret = find_lsb_set(~used_threads) - 1;
+
+	/* This might fail only if BUILD_ASSERT above fails also, but
+	 * better to be safe than sorry.
+	 */
+	__ASSERT_NO_MSG(ret >= 0);
+	used_threads |= BIT(ret);
+	LOG_DBG("Allocated stack with index %d", ret);
+
+	k_mutex_unlock(&global_console_lock);
+
+	return ret;
+}
+
+/* Free allocated stack */
+static void free_stack_idx(int idx)
+{
+	__ASSERT_NO_MSG(idx < DOM_MAX);
+
+	k_mutex_lock(&global_console_lock, K_FOREVER);
+
+	__ASSERT_NO_MSG(used_threads & BIT(idx));
+	used_threads &= ~BIT(idx);
+
+	k_mutex_unlock(&global_console_lock);
+}
+
 /*
  * Need to read from OUT ring in dom0, domU writes logs there
  * TODO: place this in separate driver
@@ -123,26 +162,17 @@ int init_domain_console(struct xen_domain *domain)
 
 int start_domain_console(struct xen_domain *domain)
 {
-	size_t slot = 0;
-
 	if (domain->console_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
 		return -EBUSY;
 	}
 
-	for (; slot < DOM_MAX && stack_slots[slot] != 0; ++slot);
-
-	if (slot >= DOM_MAX) {
-		LOG_ERR("Unable to find memory for console stack (%zu >= MAX:%d)", slot, DOM_MAX);
-		return 1;
-	}
-
-	stack_slots[slot] = domain->domid;
+	domain->console.stack_idx = get_stack_idx();
 	k_sem_init(&domain->console_sem, 1, 1);
 	domain->console_thrd_stop = false;
 	domain->console_tid =
 		k_thread_create(&domain->console_thrd,
-				read_thrd_stack[slot],
+				read_thrd_stack[domain->console.stack_idx],
 				XEN_CONSOLE_STACK_SIZE,
 				console_read_thrd, domain,
 				NULL, NULL, 7, 0, K_NO_WAIT);
@@ -153,7 +183,6 @@ int start_domain_console(struct xen_domain *domain)
 int stop_domain_console(struct xen_domain *domain)
 {
 	int rc;
-	size_t slot = 0;
 
 	if (!domain->console_tid) {
 		LOG_ERR("No console thread is running!");
@@ -165,12 +194,7 @@ int stop_domain_console(struct xen_domain *domain)
 	k_sem_give(&domain->console_sem);
 	k_thread_join(&domain->console_thrd, K_FOREVER);
 	domain->console_tid = NULL;
-
-	for (; slot < DOM_MAX && stack_slots[slot] != domain->domid; ++slot);
-
-	if (slot < DOM_MAX) {
-		stack_slots[slot] = 0;
-	}
+	free_stack_idx(domain->console.stack_idx);
 
 	unbind_event_channel(domain->console.local_evtchn);
 	rc = evtchn_close(domain->console.local_evtchn);

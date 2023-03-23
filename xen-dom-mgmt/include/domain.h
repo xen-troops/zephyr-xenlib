@@ -55,6 +55,7 @@ struct xen_domain_console {
 	struct xencons_interface *intf;
 	evtchn_port_t evtchn;
 	evtchn_port_t local_evtchn;
+	int stack_idx;
 };
 
 struct xen_domain {
