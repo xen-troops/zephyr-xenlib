@@ -22,10 +22,12 @@
 
 LOG_MODULE_REGISTER(xen_domain_console);
 
-#define XSS_CONSOLE_STACK_SIZE_PER_DOM 8192
-K_KERNEL_STACK_DEFINE(read_thrd_stack, XSS_CONSOLE_STACK_SIZE_PER_DOM * DOM_MAX);
 static size_t stack_slots[DOM_MAX] = { 0 };
+/* One page is enough for anyone */
+#define XEN_CONSOLE_STACK_SIZE		4096
 
+static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
+				   XEN_CONSOLE_STACK_SIZE);
 /*
  * Need to read from OUT ring in dom0, domU writes logs there
  * TODO: place this in separate driver
@@ -139,8 +141,10 @@ int start_domain_console(struct xen_domain *domain)
 	k_sem_init(&domain->console_sem, 1, 1);
 	domain->console_thrd_stop = false;
 	domain->console_tid =
-		k_thread_create(&domain->console_thrd, read_thrd_stack + XSS_CONSOLE_STACK_SIZE_PER_DOM * slot,
-				K_KERNEL_STACK_SIZEOF(read_thrd_stack) / DOM_MAX, console_read_thrd, domain,
+		k_thread_create(&domain->console_thrd,
+				read_thrd_stack[slot],
+				XEN_CONSOLE_STACK_SIZE,
+				console_read_thrd, domain,
 				NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;
