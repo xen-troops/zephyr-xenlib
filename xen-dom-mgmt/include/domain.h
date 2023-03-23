@@ -51,9 +51,14 @@ struct xen_domain_cfg {
 	const char *dtb_start, *dtb_end;
 };
 
+struct xen_domain_console {
+	struct xencons_interface *intf;
+	evtchn_port_t evtchn;
+	evtchn_port_t local_evtchn;
+};
+
 struct xen_domain {
 	uint32_t domid;
-	struct xencons_interface *intf;
 	struct xenstore_domain_interface *domint;
 	int num_vcpus;
 	int address_size;
@@ -65,9 +70,9 @@ struct xen_domain {
 	struct k_thread console_thrd;
 	k_tid_t console_tid;
 	bool console_thrd_stop;
-	evtchn_port_t console_evtchn;
-	evtchn_port_t local_console_evtchn;
 
+	/* TODO: domains can have more than one console */
+	struct xen_domain_console console;
 	struct k_sem xb_sem;
 	struct k_thread xenstore_thrd;
 	bool xenstore_thrd_stop;
