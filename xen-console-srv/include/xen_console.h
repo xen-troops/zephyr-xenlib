@@ -3,8 +3,8 @@
  * Copyright (c) 2023 EPAM Systems
  */
 
-#ifndef XENLIB_XEN_SHELL_H
-#define XENLIB_XEN_SHELL_H
+#ifndef XENLIB_XEN_CONSOLE_H
+#define XENLIB_XEN_CONSOLE_H
 
 /*
  * Initialize domain console by setting HVM param for domain
@@ -34,5 +34,5 @@ int start_domain_console(struct xen_domain *domain);
  */
 int stop_domain_console(struct xen_domain *domain);
 
-#endif /* XENLIB_XEN_SHELL_H */
+#endif /* XENLIB_XEN_CONSOLE_H */
 
