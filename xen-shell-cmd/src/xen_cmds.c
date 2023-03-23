@@ -10,7 +10,7 @@
 
 #include <xen_dom_mgmt.h>
 
-LOG_MODULE_DECLARE(xen_shell);
+LOG_MODULE_REGISTER(xen_shell);
 
 extern struct xen_domain_cfg domd_cfg;
 

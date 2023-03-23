@@ -32,7 +32,7 @@
 #include "mem-mgmt.h"
 
 #include <xenstore_srv.h>
-#include <xen_shell.h>
+#include <xen_console.h>
 #include <xss.h>
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
