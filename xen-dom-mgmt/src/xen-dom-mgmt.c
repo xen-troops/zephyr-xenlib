@@ -638,34 +638,6 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 	return NULL;
 }
 
-int domain_console_start(uint32_t domid)
-{
-	struct xen_domain *domain;
-
-	domain = domid_to_domain(domid);
-	if (!domain) {
-		LOG_ERR("domid#%u is not found", domid);
-		/* Domain with requested domid is not present in list */
-		return -EINVAL;
-	}
-
-	return start_domain_console(domain);
-}
-
-int domain_console_stop(uint32_t domid)
-{
-	struct xen_domain *domain;
-
-	domain = domid_to_domain(domid);
-	if (!domain) {
-		LOG_ERR("domid#%u is not found", domid);
-		/* Domain with requested domid is not present in list */
-		return -EINVAL;
-	}
-
-	return stop_domain_console(domain);
-}
-
 void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, const struct xen_domain *domain)
 {
 	char lbuffer[256] = { 0 };
