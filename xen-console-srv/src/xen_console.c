@@ -71,7 +71,8 @@ void console_read_thrd(void *dom, void *p2, void *p3)
 		do {
 			memset(out, 0, buflen);
 			memset(buffer, 0, buflen);
-			recv = read_from_ring(domain->intf, buffer + nlpos,
+			recv = read_from_ring(domain->console.intf,
+					      buffer + nlpos,
 					      sizeof(buffer) - nlpos - 1);
 			if (recv) {
 				memcpy(out, buffer, recv);
@@ -93,20 +94,22 @@ int init_domain_console(struct xen_domain *domain)
 {
 	int rc = 0;
 
-	rc = bind_interdomain_event_channel(domain->domid, domain->console_evtchn,
-					       evtchn_callback, domain);
+	rc = bind_interdomain_event_channel(domain->domid,
+					    domain->console.evtchn,
+					    evtchn_callback, domain);
 
 	if (rc < 0)
 		return rc;
 
-	domain->local_console_evtchn = rc;
+	domain->console.local_evtchn = rc;
 
 	k_sem_init(&domain->console_sem, 1, 1);
 
-	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, domain->console_evtchn,
-	       domain->local_console_evtchn);
+	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, domain->console.evtchn,
+	       domain->console.local_evtchn);
 
-	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid, domain->console_evtchn);
+	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid,
+			       domain->console.evtchn);
 
 	if (rc) {
 		LOG_ERR("Failed to set domain console evtchn param (rc=%d)", rc);
@@ -165,12 +168,13 @@ int stop_domain_console(struct xen_domain *domain)
 		stack_slots[slot] = 0;
 	}
 
-	unbind_event_channel(domain->local_console_evtchn);
-	rc = evtchn_close(domain->local_console_evtchn);
+	unbind_event_channel(domain->console.local_evtchn);
+	rc = evtchn_close(domain->console.local_evtchn);
 
 	if (rc)
 	{
-		LOG_ERR("Unable to close event channel#%u", domain->local_console_evtchn);
+		LOG_ERR("Unable to close event channel#%u",
+			domain->console.local_evtchn);
 		return rc;
 	}
 
