@@ -64,38 +64,6 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return domain_destroy(domid);
 }
 
-int domu_console_start(const struct shell *shell, size_t argc, char **argv)
-{
-	uint32_t domid = 0;
-
-	if (argc != 3)
-		return -EINVAL;
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
-
-	return domain_console_stop(domid);
-}
-
-int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
-{
-	uint32_t domid = 0;
-
-	if (argc != 3)
-		return -EINVAL;
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		shell_error(shell, "Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
-
-	return domain_console_stop(domid);
-}
-
 int domu_pause(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
@@ -140,15 +108,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      " Destroy Xen domain\n"
 		      " Usage: destroy -d <domid>\n",
 		      domu_destroy, 3, 0),
-	SHELL_CMD_ARG(console_start, NULL,
-		      " Start console thread for Xen domain\n"
-		      " Only single thread and only output is currently supported\n"
-		      " Usage: console_start -d <domid>\n",
-		      domu_console_start, 3, 0),
-	SHELL_CMD_ARG(console_stop, NULL,
-		      " Stop console thread for Xen domain\n"
-		      " Usage: console_stop -d <domid>\n",
-		      domu_console_stop, 3, 0),
 	SHELL_CMD_ARG(pause, NULL,
 		      " Pause Xen domain\n"
 		      " Usage: pause -d <domid>\n",
