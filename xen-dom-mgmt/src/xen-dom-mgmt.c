@@ -117,10 +117,10 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 		       rc);
 		return rc;
 	}
-	domain->console_evtchn = rc;
+	domain->console.evtchn = rc;
 
 	LOG_DBG("Generated remote_domid = %u, console evtchn = %u", domain->domid,
-	       domain->console_evtchn);
+	       domain->console.evtchn);
 
 	return 0;
 }
@@ -614,7 +614,7 @@ int map_domain_console_ring(struct xen_domain *domain)
 		return rc;
 	}
 
-	domain->intf = mapped_ring;
+	domain->console.intf = mapped_ring;
 
 	return 0;
 }
@@ -883,7 +883,7 @@ int domain_destroy(uint32_t domid)
 	/* TODO: do this on console destroying */
 	stop_domain_console(domain);
 
-	unmap_domain_ring(domain->intf);
+	unmap_domain_ring(domain->console.intf);
 	unmap_domain_ring(domain->domint);
 
 	rc = xen_domctl_destroydomain(domid);
