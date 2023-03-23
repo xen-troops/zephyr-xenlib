@@ -24,6 +24,8 @@ LOG_MODULE_REGISTER(xen_domain_console);
 
 /* One page is enough for anyone */
 #define XEN_CONSOLE_STACK_SIZE		4096
+/* Need low prio to make sure that guest does not lock up us in reader thread */
+#define XEN_CONSOLE_PRIO		14
 
 static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
@@ -175,7 +177,7 @@ int start_domain_console(struct xen_domain *domain)
 				read_thrd_stack[domain->console.stack_idx],
 				XEN_CONSOLE_STACK_SIZE,
 				console_read_thrd, domain,
-				NULL, NULL, 7, 0, K_NO_WAIT);
+				NULL, NULL, XEN_CONSOLE_PRIO, 0, K_NO_WAIT);
 
 	return 0;
 }
