@@ -241,13 +241,16 @@ int xen_init_domain_console(struct xen_domain *domain)
 
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid,
 			       console->evtchn);
-
 	if (rc) {
 		LOG_ERR("Failed to set domain console evtchn param (rc=%d)", rc);
-		goto err_free;
+		goto err_unbind;
 	}
 
 	return 0;
+
+err_unbind:
+	unbind_event_channel(console->local_evtchn);
+	evtchn_close(console->local_evtchn);
 
 err_free:
 	k_free(console->int_buf);
