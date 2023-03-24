@@ -111,7 +111,7 @@ static void console_read_thrd(void *dom, void *p2, void *p3)
 	compiler_barrier();
 	while (!atomic_test_and_clear_bit(&domain->console.stop_thrd,
 					  EXT_THREAD_STOP_BIT)) {
-		k_sem_take(&domain->console_sem, K_FOREVER);
+		k_sem_take(&domain->console.ext_sem, K_FOREVER);
 
 		do {
 			memset(out, 0, buflen);
@@ -132,7 +132,7 @@ static void console_read_thrd(void *dom, void *p2, void *p3)
 static void evtchn_callback(void *priv)
 {
 	struct xen_domain *domain = (struct xen_domain *)priv;
-	k_sem_give(&domain->console_sem);
+	k_sem_give(&domain->console.ext_sem);
 }
 
 int xen_init_domain_console(struct xen_domain *domain)
@@ -148,7 +148,7 @@ int xen_init_domain_console(struct xen_domain *domain)
 
 	domain->console.local_evtchn = rc;
 
-	k_sem_init(&domain->console_sem, 1, 1);
+	k_sem_init(&domain->console.ext_sem, 1, 1);
 
 	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, domain->console.evtchn,
 	       domain->console.local_evtchn);
@@ -166,17 +166,17 @@ int xen_init_domain_console(struct xen_domain *domain)
 
 int xen_start_domain_console(struct xen_domain *domain)
 {
-	if (domain->console_tid) {
+	if (domain->console.ext_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
 		return -EBUSY;
 	}
 
 	domain->console.stack_idx = get_stack_idx();
-	k_sem_init(&domain->console_sem, 1, 1);
+	k_sem_init(&domain->console.ext_sem, 1, 1);
 	atomic_clear_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
 
-	domain->console_tid =
-		k_thread_create(&domain->console_thrd,
+	domain->console.ext_tid =
+		k_thread_create(&domain->console.ext_thrd,
 				read_thrd_stack[domain->console.stack_idx],
 				XEN_CONSOLE_STACK_SIZE,
 				console_read_thrd, domain,
@@ -189,16 +189,16 @@ int xen_stop_domain_console(struct xen_domain *domain)
 {
 	int rc;
 
-	if (!domain->console_tid) {
+	if (!domain->console.ext_tid) {
 		LOG_ERR("No console thread is running!");
 		return -ESRCH;
 	}
 
 	atomic_set_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
 	/* Send event to end read cycle */
-	k_sem_give(&domain->console_sem);
-	k_thread_join(&domain->console_thrd, K_FOREVER);
-	domain->console_tid = NULL;
+	k_sem_give(&domain->console.ext_sem);
+	k_thread_join(&domain->console.ext_thrd, K_FOREVER);
+	domain->console.ext_tid = NULL;
 	free_stack_idx(domain->console.stack_idx);
 
 	unbind_event_channel(domain->console.local_evtchn);
