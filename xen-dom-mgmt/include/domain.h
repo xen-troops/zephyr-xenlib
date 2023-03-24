@@ -53,6 +53,7 @@ struct xen_domain_cfg {
 
 struct xen_domain_console {
 	struct xencons_interface *intf;
+	struct k_mutex lock;
 	struct k_thread ext_thrd;
 	struct k_sem ext_sem;
 	k_tid_t ext_tid;
@@ -60,6 +61,15 @@ struct xen_domain_console {
 	evtchn_port_t evtchn;
 	evtchn_port_t local_evtchn;
 	int stack_idx;
+
+	/* Local console ring buffer. This ring buffer differs from
+	 * standard one because it supports overruns. Number of lost
+	 * characters will be stored in `lost_chars`.
+	 */
+	char *int_buf;
+	size_t int_prod;
+	size_t int_cons;
+	size_t lost_chars;
 };
 
 struct xen_domain {
