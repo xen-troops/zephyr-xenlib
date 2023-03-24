@@ -55,12 +55,15 @@ struct xen_domain_console {
 	struct xencons_interface *intf;
 	struct k_mutex lock;
 	struct k_thread ext_thrd;
+	struct k_thread int_thrd;
 	struct k_sem ext_sem;
+	struct k_sem int_sem;
 	k_tid_t ext_tid;
 	atomic_t stop_thrd;
 	evtchn_port_t evtchn;
 	evtchn_port_t local_evtchn;
 	int stack_idx;
+	bool first_attach;
 
 	/* Local console ring buffer. This ring buffer differs from
 	 * standard one because it supports overruns. Number of lost
