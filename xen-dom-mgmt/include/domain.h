@@ -53,6 +53,9 @@ struct xen_domain_cfg {
 
 struct xen_domain_console {
 	struct xencons_interface *intf;
+	struct k_thread ext_thrd;
+	struct k_sem ext_sem;
+	k_tid_t ext_tid;
 	atomic_t stop_thrd;
 	evtchn_port_t evtchn;
 	evtchn_port_t local_evtchn;
@@ -67,10 +70,6 @@ struct xen_domain {
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
 	size_t stack_slot;
-
-	struct k_sem console_sem;
-	struct k_thread console_thrd;
-	k_tid_t console_tid;
 
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
