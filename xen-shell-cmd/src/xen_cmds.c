@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include <xen_dom_mgmt.h>
+#include <xen_console.h>
 
 LOG_MODULE_REGISTER(xen_shell);
 
@@ -64,6 +65,30 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return domain_destroy(domid);
 }
 
+int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+	struct xen_domain *domain;
+
+	if (argc != 3)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
+	domain = domid_to_domain(domid);
+	if (!domain) {
+		shell_error(shell, "domid#%u is not found", domid);
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	return xen_attach_domain_console(shell, domain);
+}
+
 int domu_pause(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
@@ -116,6 +141,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      " Unpause Xen domain\n"
 		      " Usage: unpause -d <domid>\n",
 		      domu_unpause, 3, 0),
+#ifdef CONFIG_XEN_CONSOLE_SRV
+	SHELL_CMD_ARG(console_attach, NULL,
+		      " Attach to a domain console.\n"
+		      " Press CTRL+] to detach from console\n"
+		      " Usage: console_attach -d <domid>\n",
+		      domu_console_attach, 3, 0),
+#endif
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2, 0);
