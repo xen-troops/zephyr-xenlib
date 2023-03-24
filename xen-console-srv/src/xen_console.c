@@ -96,7 +96,7 @@ static int read_from_ring(struct xencons_interface *intf, char *str, int len)
 	return recv;
 }
 
-void console_read_thrd(void *dom, void *p2, void *p3)
+static void console_read_thrd(void *dom, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
@@ -127,7 +127,7 @@ void console_read_thrd(void *dom, void *p2, void *p3)
 	}
 }
 
-void evtchn_callback(void *priv)
+static void evtchn_callback(void *priv)
 {
 	struct xen_domain *domain = (struct xen_domain *)priv;
 	k_sem_give(&domain->console_sem);
