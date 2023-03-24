@@ -97,7 +97,7 @@ static int read_from_ring(struct xencons_interface *intf, char *str, int len)
 	return recv;
 }
 
-static void console_read_thrd(void *dom, void *p2, void *p3)
+static void console_read_thrd(void *con, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
@@ -106,17 +106,17 @@ static void console_read_thrd(void *dom, void *p2, void *p3)
 	const int buflen = 128;
 	int recv;
 	int nlpos = 0;
-	struct xen_domain *domain = (struct xen_domain *)dom;
+	struct xen_domain_console *console = con;
 
 	compiler_barrier();
-	while (!atomic_test_and_clear_bit(&domain->console.stop_thrd,
+	while (!atomic_test_and_clear_bit(&console->stop_thrd,
 					  EXT_THREAD_STOP_BIT)) {
-		k_sem_take(&domain->console.ext_sem, K_FOREVER);
+		k_sem_take(&console->ext_sem, K_FOREVER);
 
 		do {
 			memset(out, 0, buflen);
 			memset(buffer, 0, buflen);
-			recv = read_from_ring(domain->console.intf,
+			recv = read_from_ring(console->intf,
 					      buffer + nlpos,
 					      sizeof(buffer) - nlpos - 1);
 			if (recv) {
@@ -131,30 +131,38 @@ static void console_read_thrd(void *dom, void *p2, void *p3)
 
 static void evtchn_callback(void *priv)
 {
-	struct xen_domain *domain = (struct xen_domain *)priv;
-	k_sem_give(&domain->console.ext_sem);
+	struct xen_domain_console *console = priv;
+
+	k_sem_give(&console->ext_sem);
 }
 
 int xen_init_domain_console(struct xen_domain *domain)
 {
 	int rc = 0;
+	struct xen_domain_console *console;
 
+	if (!domain) {
+		LOG_ERR("No domain passed to attach_domain_console");
+		return -ESRCH;
+	}
+
+	console = &domain->console;
 	rc = bind_interdomain_event_channel(domain->domid,
-					    domain->console.evtchn,
-					    evtchn_callback, domain);
+					    console->evtchn,
+					    evtchn_callback, console);
 
 	if (rc < 0)
 		return rc;
 
-	domain->console.local_evtchn = rc;
+	console->local_evtchn = rc;
 
-	k_sem_init(&domain->console.ext_sem, 1, 1);
+	k_sem_init(&console->ext_sem, 1, 1);
 
-	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, domain->console.evtchn,
-	       domain->console.local_evtchn);
+	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, console->evtchn,
+	       console->local_evtchn);
 
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid,
-			       domain->console.evtchn);
+			       console->evtchn);
 
 	if (rc) {
 		LOG_ERR("Failed to set domain console evtchn param (rc=%d)", rc);
@@ -166,20 +174,28 @@ int xen_init_domain_console(struct xen_domain *domain)
 
 int xen_start_domain_console(struct xen_domain *domain)
 {
-	if (domain->console.ext_tid) {
+	struct xen_domain_console *console;
+
+	if (!domain) {
+		LOG_ERR("No domain passed to attach_domain_console");
+		return -ESRCH;
+	}
+
+	console = &domain->console;
+	if (console->ext_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
 		return -EBUSY;
 	}
 
-	domain->console.stack_idx = get_stack_idx();
-	k_sem_init(&domain->console.ext_sem, 1, 1);
-	atomic_clear_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
+	console->stack_idx = get_stack_idx();
+	k_sem_init(&console->ext_sem, 1, 1);
+	atomic_clear_bit(&console->stop_thrd, EXT_THREAD_STOP_BIT);
 
-	domain->console.ext_tid =
-		k_thread_create(&domain->console.ext_thrd,
-				read_thrd_stack[domain->console.stack_idx],
+	console->ext_tid =
+		k_thread_create(&console->ext_thrd,
+				read_thrd_stack[console->stack_idx],
 				XEN_CONSOLE_STACK_SIZE,
-				console_read_thrd, domain,
+				console_read_thrd, console,
 				NULL, NULL, XEN_CONSOLE_PRIO, 0, K_NO_WAIT);
 
 	return 0;
@@ -188,26 +204,34 @@ int xen_start_domain_console(struct xen_domain *domain)
 int xen_stop_domain_console(struct xen_domain *domain)
 {
 	int rc;
+	struct xen_domain_console *console;
 
-	if (!domain->console.ext_tid) {
+	if (!domain) {
+		LOG_ERR("No domain passed to attach_domain_console");
+		return -ESRCH;
+	}
+
+	console = &domain->console;
+
+	if (!console->ext_tid) {
 		LOG_ERR("No console thread is running!");
 		return -ESRCH;
 	}
 
-	atomic_set_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
+	atomic_set_bit(&console->stop_thrd, EXT_THREAD_STOP_BIT);
 	/* Send event to end read cycle */
-	k_sem_give(&domain->console.ext_sem);
-	k_thread_join(&domain->console.ext_thrd, K_FOREVER);
-	domain->console.ext_tid = NULL;
-	free_stack_idx(domain->console.stack_idx);
+	k_sem_give(&console->ext_sem);
+	k_thread_join(&console->ext_thrd, K_FOREVER);
+	console->ext_tid = NULL;
+	free_stack_idx(console->stack_idx);
 
-	unbind_event_channel(domain->console.local_evtchn);
-	rc = evtchn_close(domain->console.local_evtchn);
+	unbind_event_channel(console->local_evtchn);
+	rc = evtchn_close(console->local_evtchn);
 
 	if (rc)
 	{
 		LOG_ERR("Unable to close event channel#%u",
-			domain->console.local_evtchn);
+			console->local_evtchn);
 		return rc;
 	}
 
