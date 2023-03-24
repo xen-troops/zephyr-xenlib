@@ -111,7 +111,7 @@ static void write_to_ext_ring(struct xencons_interface *intf,
 	XENCONS_RING_IDX idx = 0;
 	size_t free_space;
 
-	compiler_barrier();
+	__DSB();		/* Read counters, then write data */
 	if ((prod - cons) > sizeof(intf->in)) {
 		LOG_WRN("Invalid state of console input ring. Resetting.");
 		intf->in_prod = cons;
@@ -131,7 +131,7 @@ static void write_to_ext_ring(struct xencons_interface *intf,
 		len--;
 	}
 
-	compiler_barrier();
+	__DSB();		/* Write data, then update counter */
 	intf->in_prod = prod;
 }
 
@@ -148,7 +148,7 @@ static int read_from_ext_ring(struct xencons_interface *intf,
 	XENCONS_RING_IDX prod = intf->out_prod;
 	XENCONS_RING_IDX out_idx = 0;
 
-	compiler_barrier();
+	__DSB();		/* Read counters, then data */
 	if ((prod - cons) > sizeof(intf->out)) {
 		LOG_WRN("Invalid state of console output ring. Resetting.");
 		intf->out_cons = prod;
@@ -162,7 +162,7 @@ static int read_from_ext_ring(struct xencons_interface *intf,
 		cons++;
 	}
 
-	compiler_barrier();
+	__DSB();		/* Read data then update counter */
 	intf->out_cons = cons;
 
 	return recv;
@@ -174,7 +174,6 @@ static void console_read_thrd(void *con, void *p2, void *p3)
 	ARG_UNUSED(p3);
 	struct xen_domain_console *console = con;
 
-	compiler_barrier();
 	while (!atomic_test_and_clear_bit(&console->stop_thrd,
 					  EXT_THREAD_STOP_BIT)) {
 		k_sem_take(&console->ext_sem, K_FOREVER);
