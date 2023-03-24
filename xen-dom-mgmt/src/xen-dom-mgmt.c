@@ -827,14 +827,14 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	LOG_DBG("Map domain ring succeeded");
 
 	/* TODO: for debug, remove this or set as optional */
-	rc = init_domain_console(domain);
+	rc = xen_init_domain_console(domain);
 
 	if (rc) {
 		LOG_ERR("Unable to init domain console (rc=%d)", rc);
 		return rc;
 	}
 
-	rc = start_domain_console(domain);
+	rc = xen_start_domain_console(domain);
 
 	if (rc) {
 		LOG_ERR("Unable to start domain console (rc=%d)", rc);
@@ -881,7 +881,7 @@ int domain_destroy(uint32_t domid)
 
 	stop_domain_stored(domain);
 	/* TODO: do this on console destroying */
-	stop_domain_console(domain);
+	xen_stop_domain_console(domain);
 
 	unmap_domain_ring(domain->console.intf);
 	unmap_domain_ring(domain->domint);

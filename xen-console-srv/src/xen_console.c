@@ -133,7 +133,7 @@ void evtchn_callback(void *priv)
 	k_sem_give(&domain->console_sem);
 }
 
-int init_domain_console(struct xen_domain *domain)
+int xen_init_domain_console(struct xen_domain *domain)
 {
 	int rc = 0;
 
@@ -162,7 +162,7 @@ int init_domain_console(struct xen_domain *domain)
 	return rc;
 }
 
-int start_domain_console(struct xen_domain *domain)
+int xen_start_domain_console(struct xen_domain *domain)
 {
 	if (domain->console_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
@@ -182,7 +182,7 @@ int start_domain_console(struct xen_domain *domain)
 	return 0;
 }
 
-int stop_domain_console(struct xen_domain *domain)
+int xen_stop_domain_console(struct xen_domain *domain)
 {
 	int rc;
 

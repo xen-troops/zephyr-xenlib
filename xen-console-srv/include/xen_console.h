@@ -14,7 +14,7 @@
  *
  * @return - zero on success, negative errno on failure
  */
-int init_domain_console(struct xen_domain *domain);
+int xen_init_domain_console(struct xen_domain *domain);
 
 /*
  * Start console thread in dom0, that reads domain output.
@@ -23,7 +23,7 @@ int init_domain_console(struct xen_domain *domain);
  *
  * @return - zero on success, negative errno on failure
  */
-int start_domain_console(struct xen_domain *domain);
+int xen_start_domain_console(struct xen_domain *domain);
 
 /*
  * Stop console thread in dom0, that reads domain output.
@@ -32,6 +32,6 @@ int start_domain_console(struct xen_domain *domain);
  *
  * @return - zero on success, negative errno on failure
  */
-int stop_domain_console(struct xen_domain *domain);
+int xen_stop_domain_console(struct xen_domain *domain);
 
 #endif /* XENLIB_XEN_CONSOLE_H */
