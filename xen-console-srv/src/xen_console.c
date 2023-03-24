@@ -28,6 +28,9 @@ LOG_MODULE_REGISTER(xen_domain_console);
 #define XEN_CONSOLE_PRIO		14
 #define EXT_THREAD_STOP_BIT		0
 
+/* Size is chosen based on educated guess. It should be power of two. */
+#define XEN_CONSOLE_BUFFER_SZ		8192
+
 static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
 
@@ -35,6 +38,8 @@ static uint32_t used_threads;
 static K_MUTEX_DEFINE(global_console_lock);
 
 BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= DOM_MAX);
+BUILD_ASSERT(XEN_CONSOLE_BUFFER_SZ &&
+	     (XEN_CONSOLE_BUFFER_SZ & (XEN_CONSOLE_BUFFER_SZ - 1)) == 0);
 
 /* Allocate one stack for external reader thread */
 static int get_stack_idx(void)
@@ -70,11 +75,30 @@ static void free_stack_idx(int idx)
 	k_mutex_unlock(&global_console_lock);
 }
 
-/*
- * Need to read from OUT ring in dom0, domU writes logs there
- * TODO: place this in separate driver
+/* Write one character to the internal console ring.
+ * Should be called with console->lock held.
  */
-static int read_from_ring(struct xencons_interface *intf, char *str, int len)
+static void console_feed_int_ring(struct xen_domain_console *console, char ch)
+{
+	size_t buf_pos = console->int_prod++ & (XEN_CONSOLE_BUFFER_SZ - 1);
+
+	console->int_buf[buf_pos] = ch;
+
+	/* Special case for the already full buffer */
+	if (unlikely((console->int_prod & (XEN_CONSOLE_BUFFER_SZ - 1)) ==
+		     (console->int_cons & (XEN_CONSOLE_BUFFER_SZ - 1)))) {
+		console->lost_chars++;
+		console->int_cons++;
+	}
+}
+
+/* Read from domU ring buffer into a local ring buffer.
+ * Please note that ring buffers named in accordance to DomU point of view:
+ * intf->out is DomU output and our input;
+ */
+static int read_from_ext_ring(struct xencons_interface *intf,
+			      struct xen_domain_console *console)
+
 {
 	int recv = 0;
 	XENCONS_RING_IDX cons = intf->out_cons;
@@ -88,9 +112,9 @@ static int read_from_ring(struct xencons_interface *intf, char *str, int len)
 		return 0;
 	}
 
-	while (cons != prod && recv < len) {
+	while (cons != prod) {
 		out_idx = MASK_XENCONS_IDX(cons, intf->out);
-		str[recv] = intf->out[out_idx];
+		console_feed_int_ring(console, intf->out[out_idx]);
 		recv++;
 		cons++;
 	}
@@ -105,31 +129,20 @@ static void console_read_thrd(void *con, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
-	char buffer[128];
-	char out[128];
-	const int buflen = 128;
-	int recv;
-	int nlpos = 0;
 	struct xen_domain_console *console = con;
 
 	compiler_barrier();
 	while (!atomic_test_and_clear_bit(&console->stop_thrd,
 					  EXT_THREAD_STOP_BIT)) {
 		k_sem_take(&console->ext_sem, K_FOREVER);
-
-		do {
-			memset(out, 0, buflen);
-			memset(buffer, 0, buflen);
-			recv = read_from_ring(console->intf,
-					      buffer + nlpos,
-					      sizeof(buffer) - nlpos - 1);
-			if (recv) {
-				memcpy(out, buffer, recv);
-
-				/* Transfer output to Zephyr Dom0 console */
-				LOG_RAW("%s", buffer);
-			}
-		} while (recv);
+		/* Need to call read_from_ext_ring() till there are no
+		 * data to read, because there can be race between us
+		 * and writer in DomU
+		 */
+		k_mutex_lock(&console->lock, K_FOREVER);
+		while (read_from_ext_ring(console->intf, console))
+			;
+		k_mutex_unlock(&console->lock);
 	}
 }
 
@@ -151,16 +164,26 @@ int xen_init_domain_console(struct xen_domain *domain)
 	}
 
 	console = &domain->console;
+	console->int_buf = k_malloc(XEN_CONSOLE_BUFFER_SZ);
+	if (!console->int_buf) {
+		LOG_ERR("Failed to allocate domain console buffer");
+		return -ENOMEM;
+	}
+	console->int_prod = 0;
+	console->int_cons = 0;
+
 	rc = bind_interdomain_event_channel(domain->domid,
 					    console->evtchn,
 					    evtchn_callback, console);
 
-	if (rc < 0)
-		return rc;
+	if (rc < 0) {
+		goto err_free;
+	}
 
 	console->local_evtchn = rc;
 
 	k_sem_init(&console->ext_sem, 1, 1);
+	k_mutex_init(&console->lock);
 
 	LOG_DBG("%s: bind evtchn %u as %u\n", __func__, console->evtchn,
 	       console->local_evtchn);
@@ -170,8 +193,13 @@ int xen_init_domain_console(struct xen_domain *domain)
 
 	if (rc) {
 		LOG_ERR("Failed to set domain console evtchn param (rc=%d)", rc);
-		return rc;
+		goto err_free;
 	}
+
+	return 0;
+
+err_free:
+	k_free(console->int_buf);
 
 	return rc;
 }
@@ -228,6 +256,8 @@ int xen_stop_domain_console(struct xen_domain *domain)
 	k_thread_join(&console->ext_thrd, K_FOREVER);
 	console->ext_tid = NULL;
 	free_stack_idx(console->stack_idx);
+
+	k_free(console->int_buf);
 
 	unbind_event_channel(console->local_evtchn);
 	rc = evtchn_close(console->local_evtchn);
