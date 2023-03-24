@@ -26,6 +26,7 @@ LOG_MODULE_REGISTER(xen_domain_console);
 #define XEN_CONSOLE_STACK_SIZE		4096
 /* Need low prio to make sure that guest does not lock up us in reader thread */
 #define XEN_CONSOLE_PRIO		14
+#define EXT_THREAD_STOP_BIT		0
 
 static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
@@ -108,7 +109,8 @@ static void console_read_thrd(void *dom, void *p2, void *p3)
 	struct xen_domain *domain = (struct xen_domain *)dom;
 
 	compiler_barrier();
-	while (!domain->console_thrd_stop) {
+	while (!atomic_test_and_clear_bit(&domain->console.stop_thrd,
+					  EXT_THREAD_STOP_BIT)) {
 		k_sem_take(&domain->console_sem, K_FOREVER);
 
 		do {
@@ -171,7 +173,8 @@ int xen_start_domain_console(struct xen_domain *domain)
 
 	domain->console.stack_idx = get_stack_idx();
 	k_sem_init(&domain->console_sem, 1, 1);
-	domain->console_thrd_stop = false;
+	atomic_clear_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
+
 	domain->console_tid =
 		k_thread_create(&domain->console_thrd,
 				read_thrd_stack[domain->console.stack_idx],
@@ -191,7 +194,7 @@ int xen_stop_domain_console(struct xen_domain *domain)
 		return -ESRCH;
 	}
 
-	domain->console_thrd_stop = true;
+	atomic_set_bit(&domain->console.stop_thrd, EXT_THREAD_STOP_BIT);
 	/* Send event to end read cycle */
 	k_sem_give(&domain->console_sem);
 	k_thread_join(&domain->console_thrd, K_FOREVER);
