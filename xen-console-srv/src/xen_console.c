@@ -82,7 +82,11 @@ static int read_from_ring(struct xencons_interface *intf, char *str, int len)
 	XENCONS_RING_IDX out_idx = 0;
 
 	compiler_barrier();
-	__ASSERT((prod - cons) <= sizeof(intf->out), "Invalid input ring buffer");
+	if ((prod - cons) > sizeof(intf->out)) {
+		LOG_WRN("Invalid state of console output ring. Resetting.");
+		intf->out_cons = prod;
+		return 0;
+	}
 
 	while (cons != prod && recv < len) {
 		out_idx = MASK_XENCONS_IDX(cons, intf->out);
