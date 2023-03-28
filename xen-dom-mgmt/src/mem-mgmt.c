@@ -7,7 +7,7 @@
 #include <zephyr/xen/memory.h>
 #include <zephyr/logging/log.h>
 
-#include "mem-mgmt.h"
+#include <mem-mgmt.h>
 
 LOG_MODULE_DECLARE(xen_dom_mgmt);
 

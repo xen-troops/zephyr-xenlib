@@ -27,9 +27,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "domain.h"
-#include "xen-dom-fdt.h"
-#include "mem-mgmt.h"
+#include <domain.h>
+#include <xen-dom-fdt.h>
+#include <mem-mgmt.h>
 
 #include <xenstore_srv.h>
 #include <xen_console.h>
