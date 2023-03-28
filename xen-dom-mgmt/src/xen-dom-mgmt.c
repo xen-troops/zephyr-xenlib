@@ -130,9 +130,10 @@ static int allocate_magic_pages(int domid)
 	int rc = -ENOMEM, err_cache_flush = 0;
 	void *mapped_magic;
 	uint64_t populated_gfn;
+	const uint64_t gfn_magic_base = XEN_PHYS_PFN(GUEST_MAGIC_BASE);
 
 	populated_gfn = xenmem_populate_physmap(domid,
-						XEN_PHYS_PFN(GUEST_MAGIC_BASE),
+						gfn_magic_base,
 						PFN_4K_SHIFT,
 						NR_MAGIC_PAGES);
 	if (populated_gfn != NR_MAGIC_PAGES) {
@@ -142,7 +143,7 @@ static int allocate_magic_pages(int domid)
 	}
 
 	rc = xenmem_map_region(domid, NR_MAGIC_PAGES,
-			       XEN_PHYS_PFN(GUEST_MAGIC_BASE), &mapped_magic);
+			       gfn_magic_base, &mapped_magic);
 	if (rc) {
 		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
 		return rc;
@@ -154,7 +155,7 @@ static int allocate_magic_pages(int domid)
 	 * and then return error code.
 	 */
 	rc = xenmem_cacheflush_mapped_pfns(NR_MAGIC_PAGES,
-					   XEN_PHYS_PFN(GUEST_MAGIC_BASE));
+					   gfn_magic_base);
 	if (rc) {
 		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
 			domid, rc);
@@ -176,8 +177,7 @@ static int allocate_magic_pages(int domid)
 	}
 
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid,
-			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
-			       CONSOLE_PFN_OFFSET);
+			       gfn_magic_base + CONSOLE_PFN_OFFSET);
 	if (rc) {
 		LOG_ERR("Failed to set HVM_PARAM_CONSOLE_PFN for domid#%d (rc=%d)",
 			domid, rc);
@@ -185,8 +185,7 @@ static int allocate_magic_pages(int domid)
 	}
 
 	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid,
-			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
-			       XENSTORE_PFN_OFFSET);
+			       gfn_magic_base + XENSTORE_PFN_OFFSET);
 	if (rc) {
 		LOG_ERR("Failed to set HVM_PARAM_STORE_PFN for domid#%d (rc=%d)",
 			domid, rc);
