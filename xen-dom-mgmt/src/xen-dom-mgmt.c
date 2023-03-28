@@ -760,7 +760,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	char *domdtdevs;
 	struct modules_address modules = {0};
 
-	if (dom_num >= DOM_MAX) {
+	if (dom_num >= CONFIG_DOM_MAX) {
 		LOG_ERR("Runtime exceeds maximum number of domains");
 		return -EINVAL;
 	}
