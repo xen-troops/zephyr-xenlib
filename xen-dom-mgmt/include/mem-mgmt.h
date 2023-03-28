@@ -25,7 +25,7 @@
  * @param domid - domain ID which memory will be mapped
  * @param nr_pages - number of pages with XEN_PAGE_SIZE that will be mapped
  * @param base_pfn - PFN from which memory will be mapped
- * @param mapped_addr - result pointer for pointer with mapped memory
+ * @param mapped_addr - result pointer to pointer with mapped memory
  *
  * @return - zero on success, negative errno on failure
  */
