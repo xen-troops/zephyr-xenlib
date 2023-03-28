@@ -7,7 +7,6 @@
 #ifndef XENLIB_XENSTORE_SRV_H
 #define XENLIB_XENSTORE_SRV_H
 
-#define DOM_MAX 4
 #define STRING_LENGTH_MAX 128
 
 struct xs_entry {
