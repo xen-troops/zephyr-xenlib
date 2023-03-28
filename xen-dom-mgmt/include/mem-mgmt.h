@@ -63,7 +63,7 @@ int xenmem_cacheflush_mapped_pfns(uint64_t nr_pages, uint64_t base_pfn);
  * @param base_pfn - PFN from which memory will be populated
  * @param pfn_shift - the order of PFNs that will be populated.
  * Acceptable values are: @PFN_4K_SHIFT, @PFN_2M_SHIFT or @PFN_1G_SHIFT
- * @nr_pages - number of pages with XEN_PAGE_SIZE that will be populated
+ * @param nr_pages - number of pages with XEN_PAGE_SIZE that will be populated
  *
  * @return - number of pages that were successfully populated
  */
