@@ -35,7 +35,7 @@ LOG_MODULE_REGISTER(xen_domain_console);
 
 #define ESCAPE_CHARACTER		0x1d /* CTR+] */
 
-static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, DOM_MAX,
+static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, CONFIG_DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
 static K_THREAD_STACK_DEFINE(display_thrd_stack, XEN_CONSOLE_STACK_SIZE);
 
@@ -44,7 +44,7 @@ static K_MUTEX_DEFINE(global_console_lock);
 /* There we store pointer to an attached console */
 static struct xen_domain_console *current_console;
 
-BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= DOM_MAX);
+BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOM_MAX);
 BUILD_ASSERT(XEN_CONSOLE_BUFFER_SZ &&
 	     (XEN_CONSOLE_BUFFER_SZ & (XEN_CONSOLE_BUFFER_SZ - 1)) == 0);
 
@@ -72,7 +72,7 @@ static int get_stack_idx(void)
 /* Free allocated stack */
 static void free_stack_idx(int idx)
 {
-	__ASSERT_NO_MSG(idx < DOM_MAX);
+	__ASSERT_NO_MSG(idx < CONFIG_DOM_MAX);
 
 	k_mutex_lock(&global_console_lock, K_FOREVER);
 
