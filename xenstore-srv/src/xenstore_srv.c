@@ -21,8 +21,9 @@
 LOG_MODULE_REGISTER(xenstore);
 
 #define XENSTORE_STACK_SIZE_PER_DOM (32 * 1024)
-K_KERNEL_STACK_DEFINE(xenstore_thrd_stack, XENSTORE_STACK_SIZE_PER_DOM *DOM_MAX);
-static int stack_slots[DOM_MAX] = { 0 };
+K_KERNEL_STACK_DEFINE(xenstore_thrd_stack,
+		      XENSTORE_STACK_SIZE_PER_DOM * CONFIG_DOM_MAX);
+static int stack_slots[CONFIG_DOM_MAX] = { 0 };
 
 K_MUTEX_DEFINE(xsel_mutex);
 K_MUTEX_DEFINE(pfl_mutex);
@@ -824,19 +825,23 @@ int start_domain_stored(struct xen_domain *domain)
 
 	domain->xenstore_thrd_stop = false;
 
-	for (; slot < DOM_MAX && stack_slots[slot] != 0; ++slot)
+	for (; slot < CONFIG_DOM_MAX && stack_slots[slot] != 0; ++slot)
 		;
 
-	if (slot >= DOM_MAX) {
-		LOG_ERR("Unable to find memory for xenbus stack (%zu >= MAX:%d)", slot, DOM_MAX);
+	if (slot >= CONFIG_DOM_MAX) {
+		LOG_ERR("Unable to find memory for xenbus stack (%zu >= MAX:%d)",
+			slot, CONFIG_DOM_MAX);
 		return 1;
 	}
 
 	stack_slots[slot] = domain->domid;
 	domain->stack_slot = slot;
 	domain->xenstore_tid =
-		k_thread_create(&domain->xenstore_thrd, xenstore_thrd_stack + XENSTORE_STACK_SIZE_PER_DOM * slot,
-				K_KERNEL_STACK_SIZEOF(xenstore_thrd_stack) / DOM_MAX, xenstore_evt_thrd,
+		k_thread_create(&domain->xenstore_thrd,
+				xenstore_thrd_stack +
+				XENSTORE_STACK_SIZE_PER_DOM * slot,
+				K_KERNEL_STACK_SIZEOF(xenstore_thrd_stack) /
+				CONFIG_DOM_MAX, xenstore_evt_thrd,
 				domain, NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;
