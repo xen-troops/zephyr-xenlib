@@ -347,7 +347,7 @@ static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
 }
 
 static int probe_zimage(int domid, uint64_t base_addr,
-			uint64_t image_load_offset,
+			uint64_t image_read_offset,
 			struct xen_domain_cfg *domcfg,
 			struct modules_address *modules)
 {
@@ -369,13 +369,13 @@ static int probe_zimage(int domid, uint64_t base_addr,
 	}
 
 	rc = domcfg->load_image_bytes((uint8_t *)&zhdr, sizeof(zhdr),
-					image_load_offset, domcfg->image_info);
+					image_read_offset, domcfg->image_info);
 	if (rc < 0) {
 		LOG_ERR("Error calling load_image_bytes rc: %d\n", rc);
 		return rc;
 	}
 
-	load_addr = base_addr + zhdr.text_offset + image_load_offset;
+	load_addr = base_addr + zhdr.text_offset;
 	load_gfn = XEN_PHYS_PFN(load_addr);
 
 	rc = domcfg->get_image_size(domcfg->image_info, &domain_size);
@@ -424,7 +424,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 
 	/* Copy binary to domain pages and clear cache */
 	rc = domcfg->load_image_bytes(mapped_domd, domain_size,
-				      0, domcfg->image_info);
+				      image_read_offset, domcfg->image_info);
 	if (rc < 0) {
 		LOG_ERR("Error calling load_image_bytes rc: %d", rc);
 		goto out_dtb;
