@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include <zephyr/init.h>
 #include <zephyr/xen/events.h>
 #include <zephyr/xen/public/hvm/params.h>
 #include <zephyr/xen/public/io/xs_wire.h>
@@ -991,8 +992,14 @@ void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 	cleanup_domain_watches(domain);
 }
 
-void init_root(void)
+static int xs_init_root(const struct device *d)
 {
+	ARG_UNUSED(d);
+
 	sys_dlist_init(&root_xenstore.child_list);
 	sys_dnode_init(&root_xenstore.node);
+
+	return 0;
 }
+
+SYS_INIT(xs_init_root, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
