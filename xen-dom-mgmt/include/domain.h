@@ -20,8 +20,23 @@ struct xen_domain_iomem {
 	uint64_t nr_mfns;
 };
 
+/**
+ * Function cb, that should load bufsize domain image bytes to given buffer
+ * @param buf buffer, where bytes should be loaded
+ * @param bufsize number of image bytes, that should be loaded
+ * @param read_offset number of bytes, that should be skipped from image start
+ * @param image_info private data, passed to callback
+ * @return 0 on success, negative errno on error
+ */
 typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
-				uint64_t image_load_offset, void *image_info);
+				uint64_t read_offset, void *image_info);
+
+/**
+ * Function cb, that should return image size in bytes
+ * @param image_info private data, that can be passed to cb
+ * @param size output parameter, uint64_t pointer to result
+ * @return 0 on success, negative errno on error
+ */
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
 struct xen_domain_cfg {
