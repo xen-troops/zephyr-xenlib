@@ -26,7 +26,10 @@ LOG_MODULE_REGISTER(xenstore);
 static K_THREAD_STACK_ARRAY_DEFINE(xenstore_thrd_stack,
 				   CONFIG_DOM_MAX,
 				   XENSTORE_STACK_SIZE_PER_DOM);
-static int stack_slots[CONFIG_DOM_MAX] = { 0 };
+
+static uint32_t used_threads;
+static K_MUTEX_DEFINE(xs_stack_lock);
+BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOM_MAX);
 
 K_MUTEX_DEFINE(xsel_mutex);
 K_MUTEX_DEFINE(pfl_mutex);
@@ -40,6 +43,41 @@ struct xs_entry root_xenstore;
 struct message_handle {
 	void (*h)(struct xen_domain *domain, uint32_t id, char *payload, uint32_t sz);
 };
+
+/* Allocate one stack for external reader thread */
+static int get_stack_idx(void)
+{
+	int ret;
+
+	k_mutex_lock(&xs_stack_lock, K_FOREVER);
+
+	ret = find_lsb_set(~used_threads) - 1;
+
+	/* This might fail only if BUILD_ASSERT above fails also, but
+	 * better to be safe than sorry.
+	 */
+	__ASSERT_NO_MSG(ret >= 0);
+	used_threads |= BIT(ret);
+	LOG_DBG("Allocated stack with index %d", ret);
+
+	k_mutex_unlock(&xs_stack_lock);
+
+	return ret;
+}
+
+/* Free allocated stack */
+static void free_stack_idx(int idx)
+{
+	__ASSERT_NO_MSG(idx < CONFIG_DOM_MAX);
+
+	k_mutex_lock(&xs_stack_lock, K_FOREVER);
+
+	__ASSERT_NO_MSG(used_threads & BIT(idx));
+	used_threads &= ~BIT(idx);
+
+	k_mutex_unlock(&xs_stack_lock);
+}
+
 
 struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 {
@@ -806,17 +844,7 @@ void xs_evtchn_cb(void *priv)
 
 int start_domain_stored(struct xen_domain *domain)
 {
-	size_t slot = 0;
 	int rc = 0, err_ret;
-
-	for (; slot < CONFIG_DOM_MAX && stack_slots[slot] != 0; ++slot)
-		;
-
-	if (slot >= CONFIG_DOM_MAX) {
-		LOG_ERR("Unable to find memory for xenbus stack (%zu >= MAX:%d)",
-			slot, CONFIG_DOM_MAX);
-		return -E2BIG;
-	}
 
 	rc = xenmem_map_region(domain->domid, 1,
 			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
@@ -850,11 +878,11 @@ int start_domain_stored(struct xen_domain *domain)
 	}
 
 	domain->xenstore_thrd_stop = false;
-	stack_slots[slot] = domain->domid;
-	domain->stack_slot = slot;
+
+	domain->xs_stack_slot = get_stack_idx();
 	domain->xenstore_tid =
 		k_thread_create(&domain->xenstore_thrd,
-				xenstore_thrd_stack[slot],
+				xenstore_thrd_stack[domain->xs_stack_slot],
 				XENSTORE_STACK_SIZE_PER_DOM,
 				xenstore_evt_thrd,
 				domain, NULL, NULL, 7, 0, K_NO_WAIT);
@@ -878,7 +906,7 @@ int stop_domain_stored(struct xen_domain *domain)
 	domain->xenstore_thrd_stop = true;
 	k_sem_give(&domain->xb_sem);
 	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
-	stack_slots[domain->stack_slot] = 0;
+	free_stack_idx(domain->xs_stack_slot);
 	unbind_event_channel(domain->local_xenstore_evtchn);
 
 	rc = evtchn_close(domain->local_xenstore_evtchn);
