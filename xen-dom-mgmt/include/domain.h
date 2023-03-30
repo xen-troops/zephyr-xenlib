@@ -106,7 +106,7 @@ struct xen_domain {
 	int address_size;
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
-	size_t stack_slot;
+	size_t xs_stack_slot;
 
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
