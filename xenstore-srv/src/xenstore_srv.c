@@ -22,9 +22,10 @@
 
 LOG_MODULE_REGISTER(xenstore);
 
-#define XENSTORE_STACK_SIZE_PER_DOM (32 * 1024)
-K_KERNEL_STACK_DEFINE(xenstore_thrd_stack,
-		      XENSTORE_STACK_SIZE_PER_DOM * CONFIG_DOM_MAX);
+#define XENSTORE_STACK_SIZE_PER_DOM	4096
+static K_THREAD_STACK_ARRAY_DEFINE(xenstore_thrd_stack,
+				   CONFIG_DOM_MAX,
+				   XENSTORE_STACK_SIZE_PER_DOM);
 static int stack_slots[CONFIG_DOM_MAX] = { 0 };
 
 K_MUTEX_DEFINE(xsel_mutex);
@@ -853,10 +854,9 @@ int start_domain_stored(struct xen_domain *domain)
 	domain->stack_slot = slot;
 	domain->xenstore_tid =
 		k_thread_create(&domain->xenstore_thrd,
-				xenstore_thrd_stack +
-				XENSTORE_STACK_SIZE_PER_DOM * slot,
-				K_KERNEL_STACK_SIZEOF(xenstore_thrd_stack) /
-				CONFIG_DOM_MAX, xenstore_evt_thrd,
+				xenstore_thrd_stack[slot],
+				XENSTORE_STACK_SIZE_PER_DOM,
+				xenstore_evt_thrd,
 				domain, NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;
