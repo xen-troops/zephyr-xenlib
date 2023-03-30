@@ -18,8 +18,6 @@
 #include <xen_dom_mgmt.h>
 #include "xrun.h"
 
-#define MAX_STR_SIZE 64
-
 LOG_MODULE_REGISTER(xrun);
 
 #define CONTAINER_NAME_SIZE 64
@@ -70,8 +68,8 @@ struct container {
 	char *cmdline;
 
 	uint64_t domid;
-	char kernel_image[MAX_STR_SIZE];
-	char dt_image[MAX_STR_SIZE];
+	char kernel_image[CONFIG_XRUN_MAX_PATH_SIZE];
+	char dt_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	bool has_dt_image;
 	/* struct domain_spec spec; */
 	struct xen_domain_cfg domcfg;
@@ -457,7 +455,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	}
 
 	ret = snprintf(container->kernel_image,
-		       MAX_STR_SIZE,
+		       CONFIG_XRUN_MAX_PATH_SIZE,
 		       "%s", spec.vm.kernel.path);
 	if (ret < strlen(spec.vm.kernel.path)) {
 		LOG_ERR("Unable to get kernel path, rc = %d", ret);
@@ -468,7 +466,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 
 	if (container->has_dt_image) {
 		ret = snprintf(container->dt_image,
-			       MAX_STR_SIZE,
+			       CONFIG_XRUN_MAX_PATH_SIZE,
 			       "%s", spec.vm.hwconfig.devicetree);
 		if (ret < strlen(spec.vm.hwconfig.devicetree)) {
 			LOG_ERR("Unable to get device-tree path, rc = %d", ret);
