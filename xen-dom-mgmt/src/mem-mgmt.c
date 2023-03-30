@@ -10,6 +10,10 @@
 #include <mem-mgmt.h>
 
 LOG_MODULE_DECLARE(xen_dom_mgmt);
+K_MUTEX_DEFINE(chunks_mutex);
+static uint64_t gfns[CONFIG_PFN_CHUNK_SIZE];
+static uint64_t pfns[CONFIG_PFN_CHUNK_SIZE];
+static int err_codes[CONFIG_PFN_CHUNK_SIZE];
 
 static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 						      uint64_t base_pfn,
@@ -18,11 +22,9 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 {
 	int rc;
 	uint64_t i = 0;
-	uint64_t gfns[CONFIG_PFN_CHUNK_SIZE];
-	uint64_t pfns[CONFIG_PFN_CHUNK_SIZE];
-	int err_codes[CONFIG_PFN_CHUNK_SIZE];
 	int j, iter;
 
+	k_mutex_lock(&chunks_mutex, K_FOREVER);
 	while (i < nr_pages) {
 		iter = MIN(nr_pages - i, CONFIG_PFN_CHUNK_SIZE);
 
@@ -36,6 +38,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 						 iter, gfns,
 						 pfns, err_codes);
 		if (rc < 0) {
+			k_mutex_unlock(&chunks_mutex);
 			LOG_ERR("Failed to add to physmap batch for domain#%u (rc=%d)",
 				domid, rc);
 			return i;
@@ -44,6 +47,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 		/* Check error codes for every page frame */
 		for (j = 0; j < iter; j++) {
 			if (err_codes[j]) {
+				k_mutex_unlock(&chunks_mutex);
 				/*
 				 * Return the last successfully added
 				 * PFN number.
@@ -58,6 +62,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 		base_pfn += iter;
 		base_gfn += iter;
 	}
+	k_mutex_unlock(&chunks_mutex);
 
 	return i;
 }
@@ -68,10 +73,10 @@ uint64_t xenmem_populate_physmap(int domid,
 				 uint64_t nr_pages)
 {
 	uint64_t i = 0, j;
-	uint64_t pfns[CONFIG_PFN_CHUNK_SIZE];
 	unsigned int populate_iter;
 	int ret;
 
+	k_mutex_lock(&chunks_mutex, K_FOREVER);
 	while (i < nr_pages) {
 		populate_iter = MIN(nr_pages - i, CONFIG_PFN_CHUNK_SIZE);
 
@@ -83,11 +88,13 @@ uint64_t xenmem_populate_physmap(int domid,
 					      0, pfns);
 		i += ret;
 		if (ret != populate_iter) {
+			k_mutex_unlock(&chunks_mutex);
 			LOG_ERR("Failed to populate physmap (rc=%d)", ret);
 			return i;
 		}
 		base_pfn += (populate_iter << pfn_shift);
 	}
+	k_mutex_unlock(&chunks_mutex);
 
 	return i;
 }
