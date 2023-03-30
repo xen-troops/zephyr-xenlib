@@ -267,12 +267,14 @@ static int fill_domcfg(struct container *container)
 	/* irqs = domd_irqs, */
 	domcfg->nr_irqs = 0;
 	/*
-	 * TODO: We support only GIC_V2 for not because it's
-	 * comatible with both GiC_V2 and GIC_V3.
 	 * Current implementation doesn't support GIC_NATIVE
-	 * parameter.
+	 * parameter. We use the same gic version as is on the system.
 	 */
+#if defined(CONFIG_GIC_V3)
+	domcfg->gic_version = XEN_DOMCTL_CONFIG_GIC_V3;
+#else
 	domcfg->gic_version = XEN_DOMCTL_CONFIG_GIC_V2;
+#endif
 	domcfg->tee_type = XEN_DOMCTL_CONFIG_TEE_NONE;
 
 	/* domcfg->dtdevs = domd_dtdevs, */
