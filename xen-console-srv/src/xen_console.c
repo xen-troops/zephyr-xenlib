@@ -420,7 +420,12 @@ static void console_shell_cb(const struct shell *shell,
 	console = current_console;
 	k_mutex_unlock(&global_console_lock);
 
-	__ASSERT_NO_MSG(console != NULL);
+	if (!console) {
+		/* This may happen if xen_stop_domain_console() was
+		 * called when console is still attached */
+		shell_set_bypass(shell, NULL);
+		return;
+	}
 
 	if (len == 1 && data[0] == ESCAPE_CHARACTER) {
 		/* Detach console */
