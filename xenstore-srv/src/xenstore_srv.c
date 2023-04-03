@@ -877,7 +877,7 @@ int start_domain_stored(struct xen_domain *domain)
 		goto unmap_ring;
 	}
 
-	domain->xenstore_thrd_stop = false;
+	atomic_clear(&domain->xenstore_thrd_stop);
 
 	domain->xs_stack_slot = get_stack_idx();
 	domain->xenstore_tid =
@@ -903,7 +903,7 @@ int stop_domain_stored(struct xen_domain *domain)
 	int rc = 0, err = 0;
 
 	LOG_DBG("Destroy domain#%u", domain->domid);
-	domain->xenstore_thrd_stop = true;
+	atomic_set(&domain->xenstore_thrd_stop, 1);
 	k_sem_give(&domain->xb_sem);
 	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
 	free_stack_idx(domain->xs_stack_slot);
@@ -991,7 +991,7 @@ void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 	domain->stop_transaction_id = 0;
 	domain->pending_stop_transaction = false;
 
-	while (!domain->xenstore_thrd_stop) {
+	while (!atomic_get(&domain->xenstore_thrd_stop)) {
 		process_pending_watch_events(domain, domain->running_transaction);
 
 		if (domain->pending_stop_transaction) {
