@@ -96,7 +96,7 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 	return NULL;
 }
 
-struct xs_entry *key_to_entry(const char *key)
+static struct xs_entry *key_to_entry(const char *key)
 {
 	static const char rootdir[] = "/";
 
@@ -142,7 +142,8 @@ static bool check_indexes(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod)
 	return ((prod - cons) > XENSTORE_RING_SIZE);
 }
 
-static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, size_t *len)
+static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
+			       size_t *len)
 {
 	size_t delta = prod - cons;
 	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(cons);
@@ -154,7 +155,8 @@ static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, s
 	return MASK_XENSTORE_IDX(cons);
 }
 
-static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, size_t *len)
+static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
+				size_t *len)
 {
 	size_t delta = XENSTORE_RING_SIZE - cons + prod;
 	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(prod);
@@ -166,7 +168,8 @@ static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, 
 	return MASK_XENSTORE_IDX(prod);
 }
 
-void write_xb(struct xenstore_domain_interface *intf, uint8_t *data, uint32_t len)
+static void write_xb(struct xenstore_domain_interface *intf, uint8_t *data,
+		     uint32_t len)
 {
 	size_t blen = 0;
 	size_t offset = 0;
@@ -186,7 +189,7 @@ void write_xb(struct xenstore_domain_interface *intf, uint8_t *data, uint32_t le
 	} while (len > 0);
 }
 
-size_t read_xb(struct xen_domain *domain, uint8_t *data, uint32_t len)
+static size_t read_xb(struct xen_domain *domain, uint8_t *data, uint32_t len)
 {
 	size_t blen = 0;
 	size_t offset = 0;
@@ -211,8 +214,9 @@ size_t read_xb(struct xen_domain *domain, uint8_t *data, uint32_t len)
 	return offset;
 }
 
-void send_reply_sz(struct xen_domain *domain, uint32_t id, uint32_t msg_type, const char *payload,
-		   int sz)
+static void send_reply_sz(struct xen_domain *domain, uint32_t id,
+			  uint32_t msg_type, const char *payload,
+			  int sz)
 {
 	struct xenstore_domain_interface *intf = domain->domint;
 	struct xsd_sockmsg h = { .req_id = id, .type = msg_type, .len = sz };
@@ -228,17 +232,20 @@ void send_reply_sz(struct xen_domain *domain, uint32_t id, uint32_t msg_type, co
 	notify_evtchn(domain->local_xenstore_evtchn);
 }
 
-void send_reply(struct xen_domain *domain, uint32_t id, uint32_t msg_type, const char *payload)
+static void send_reply(struct xen_domain *domain, uint32_t id,
+		       uint32_t msg_type, const char *payload)
 {
 	send_reply_sz(domain, id, msg_type, payload, strlen(payload) + 1);
 }
 
-void send_reply_read(struct xen_domain *domain, uint32_t id, uint32_t msg_type, char *payload)
+static void send_reply_read(struct xen_domain *domain, uint32_t id,
+			    uint32_t msg_type, char *payload)
 {
 	send_reply_sz(domain, id, msg_type, payload, strlen(payload));
 }
 
-void handle_directory(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_directory(struct xen_domain *domain, uint32_t id,
+			     char *payload, uint32_t len)
 {
 	size_t data_offset = strlen(payload) + 1;
 	const char localpath[] = "/";
@@ -270,7 +277,7 @@ void handle_directory(struct xen_domain *domain, uint32_t id, char *payload, uin
 	send_reply_sz(domain, id, XS_DIRECTORY, dirlist, reply_sz);
 }
 
-void send_errno(struct xen_domain *domain, uint32_t id, int err)
+static void send_errno(struct xen_domain *domain, uint32_t id, int err)
 {
 	unsigned int i;
 	LOG_ERR("Sending error=%d", err);
@@ -286,7 +293,7 @@ void send_errno(struct xen_domain *domain, uint32_t id, int err)
 	send_reply(domain, id, XS_ERROR, xsd_errors[i].errstring);
 }
 
-int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
+static int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 {
 	struct watch_entry *iter, *next;
 	size_t kplen = strlen(key);
@@ -460,8 +467,9 @@ pentry_fail:
 		iter->domain->domid, path);
 }
 
-void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, char *payload,
-		   uint32_t len)
+static void _handle_write(struct xen_domain *domain, uint32_t id,
+			  uint32_t msg_type, char *payload,
+			  uint32_t len)
 {
 	char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
@@ -490,17 +498,19 @@ void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, ch
 	notify_watchers(path, domain->domid);
 }
 
-void handle_write(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_write(struct xen_domain *domain, uint32_t id, char *payload,
+			 uint32_t len)
 {
 	_handle_write(domain, id, XS_WRITE, payload, len);
 }
 
-void handle_mkdir(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_mkdir(struct xen_domain *domain, uint32_t id, char *payload,
+			 uint32_t len)
 {
 	_handle_write(domain, id, XS_MKDIR, payload, len);
 }
 
-void process_pending_watch_events(struct xen_domain *domain, uint32_t id)
+static void process_pending_watch_events(struct xen_domain *domain, uint32_t id)
 {
 	struct pending_watch_event_entry *iter, *next;
 
@@ -524,22 +534,25 @@ void process_pending_watch_events(struct xen_domain *domain, uint32_t id)
 	k_mutex_unlock(&pfl_mutex);
 }
 
-void handle_control(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_control(struct xen_domain *domain, uint32_t id,
+			   char *payload, uint32_t len)
 {
 	send_reply(domain, id, XS_CONTROL, "OK");
 }
 
-void handle_get_perms(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_get_perms(struct xen_domain *domain, uint32_t id,
+			     char *payload, uint32_t len)
 {
 	send_errno(domain, id, ENOSYS);
 }
 
-void handle_set_perms(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_set_perms(struct xen_domain *domain, uint32_t id,
+			     char *payload, uint32_t len)
 {
 	send_reply(domain, id, XS_SET_PERMS, "OK");
 }
 
-void remove_watch_entry(struct watch_entry *entry)
+static void remove_watch_entry(struct watch_entry *entry)
 {
 	k_free(entry->key);
 	k_free(entry->token);
@@ -547,7 +560,8 @@ void remove_watch_entry(struct watch_entry *entry)
 	k_free(entry);
 }
 
-void handle_reset_watches(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_reset_watches(struct xen_domain *domain, uint32_t id,
+				 char *payload, uint32_t len)
 {
 	struct watch_entry *iter, *next;
 
@@ -560,7 +574,8 @@ void handle_reset_watches(struct xen_domain *domain, uint32_t id, char *payload,
 	send_reply(domain, id, XS_RESET_WATCHES, "OK");
 }
 
-void handle_read(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_read(struct xen_domain *domain, uint32_t id, char *payload,
+			uint32_t len)
 {
 	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
@@ -582,7 +597,7 @@ void handle_read(struct xen_domain *domain, uint32_t id, char *payload, uint32_t
 	send_reply(domain, id, XS_ERROR, "ENOENT");
 }
 
-void remove_recurse(sys_dlist_t *chlds)
+static void remove_recurse(sys_dlist_t *chlds)
 {
 	struct xs_entry *entry, *next;
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (chlds, entry, next, node) {
@@ -634,14 +649,15 @@ int xss_rm(const char *path)
 	return xss_do_rm(key_to_entry(path));
 }
 
-void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
+static void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
 	       uint32_t len)
 {
 	xss_do_rm(key_to_entry(payload));
 	send_reply_read(domain, id, XS_RM, "");
 }
 
-void handle_watch(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
+			 uint32_t len)
 {
 	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
@@ -773,7 +789,8 @@ pentry_fail:
 		domain->domid);
 }
 
-void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_unwatch(struct xen_domain *domain, uint32_t id,
+			   char *payload, uint32_t len)
 {
 	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX] = { 0 };
@@ -803,7 +820,8 @@ void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint3
 	send_reply(domain, id, XS_UNWATCH, "");
 }
 
-void handle_transaction_start(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_transaction_start(struct xen_domain *domain, uint32_t id,
+				     char *payload, uint32_t len)
 {
 	char buf[8] = { 0 };
 
@@ -819,7 +837,8 @@ void handle_transaction_start(struct xen_domain *domain, uint32_t id, char *payl
 	send_reply(domain, id, XS_TRANSACTION_START, buf);
 }
 
-void handle_transaction_stop(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_transaction_stop(struct xen_domain *domain, uint32_t id,
+				    char *payload, uint32_t len)
 {
 	// TODO check contents, transaction completion, etc
 	domain->stop_transaction_id = id;
@@ -827,7 +846,8 @@ void handle_transaction_stop(struct xen_domain *domain, uint32_t id, char *paylo
 	domain->running_transaction = 0;
 }
 
-void handle_get_domain_path(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
+static void handle_get_domain_path(struct xen_domain *domain, uint32_t id,
+				   char *payload, uint32_t len)
 {
 	char path[32] = { 0 };
 	char domid[8] = { 0 };
@@ -836,97 +856,13 @@ void handle_get_domain_path(struct xen_domain *domain, uint32_t id, char *payloa
 	send_reply(domain, id, XS_GET_DOMAIN_PATH, path);
 }
 
-void xs_evtchn_cb(void *priv)
+static void xs_evtchn_cb(void *priv)
 {
 	struct xen_domain *domain = (struct xen_domain *)priv;
 	k_sem_give(&domain->xb_sem);
 }
 
-int start_domain_stored(struct xen_domain *domain)
-{
-	int rc = 0, err_ret;
-
-	rc = xenmem_map_region(domain->domid, 1,
-			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
-			       XENSTORE_PFN_OFFSET,
-			       (void **)&domain->domint);
-	if (rc < 0) {
-		LOG_ERR("Failed to map xenstore ring for domain#%u (rc=%d)",
-			domain->domid, rc);
-		return rc;
-	}
-
-	domain->domint->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
-	domain->domint->connection = XENSTORE_CONNECTED;
-
-	k_sem_init(&domain->xb_sem, 0, 1);
-	rc = bind_interdomain_event_channel(domain->domid,
-					    domain->xenstore_evtchn,
-					    xs_evtchn_cb,
-					    (void *)domain);
-	if (rc < 0) {
-		LOG_ERR("Failed to bind interdomain event channel (rc=%d)", rc);
-		goto unmap_ring;
-	}
-
-	domain->local_xenstore_evtchn = rc;
-
-	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
-	if (rc) {
-		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
-		goto unmap_ring;
-	}
-
-	atomic_clear(&domain->xenstore_thrd_stop);
-
-	domain->xs_stack_slot = get_stack_idx();
-	domain->xenstore_tid =
-		k_thread_create(&domain->xenstore_thrd,
-				xenstore_thrd_stack[domain->xs_stack_slot],
-				XENSTORE_STACK_SIZE_PER_DOM,
-				xenstore_evt_thrd,
-				domain, NULL, NULL, 7, 0, K_NO_WAIT);
-
-	return 0;
-
-unmap_ring:
-	err_ret = xenmem_unmap_region(1, domain->domint);
-	if (err_ret < 0) {
-		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
-			domain->domid, err_ret);
-	}
-	return rc;
-}
-
-int stop_domain_stored(struct xen_domain *domain)
-{
-	int rc = 0, err = 0;
-
-	LOG_DBG("Destroy domain#%u", domain->domid);
-	atomic_set(&domain->xenstore_thrd_stop, 1);
-	k_sem_give(&domain->xb_sem);
-	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
-	free_stack_idx(domain->xs_stack_slot);
-	unbind_event_channel(domain->local_xenstore_evtchn);
-
-	rc = evtchn_close(domain->local_xenstore_evtchn);
-	if (rc) {
-		LOG_ERR("Unable to close event channel#%u (rc=%d)",
-			domain->local_xenstore_evtchn, rc);
-		err = rc;
-	}
-
-	rc = xenmem_unmap_region(1, domain->domint);
-	if (rc < 0) {
-		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
-			domain->domid, rc);
-		err = rc;
-	}
-
-	return err;
-}
-
-void cleanup_domain_watches(struct xen_domain *domain)
+static void cleanup_domain_watches(struct xen_domain *domain)
 {
 	struct watch_entry *iter, *next;
 	struct pending_watch_event_entry *pwe_iter, *pwe_next;
@@ -974,7 +910,7 @@ const struct message_handle message_handle_list[XS_TYPE_COUNT] = { [XS_CONTROL] 
 					    [XS_RESET_WATCHES] = { handle_reset_watches },
 					    [XS_DIRECTORY_PART] = { NULL } };
 
-void xenstore_evt_thrd(void *p1, void *p2, void *p3)
+static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
@@ -1048,6 +984,91 @@ void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 
 	/* Need to cleanup all watches and events before destroying */
 	cleanup_domain_watches(domain);
+}
+
+int start_domain_stored(struct xen_domain *domain)
+{
+	int rc = 0, err_ret;
+
+	rc = xenmem_map_region(domain->domid, 1,
+			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
+			       XENSTORE_PFN_OFFSET,
+			       (void **)&domain->domint);
+	if (rc < 0) {
+		LOG_ERR("Failed to map xenstore ring for domain#%u (rc=%d)",
+			domain->domid, rc);
+		return rc;
+	}
+
+	domain->domint->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
+	domain->domint->connection = XENSTORE_CONNECTED;
+
+	k_sem_init(&domain->xb_sem, 0, 1);
+	rc = bind_interdomain_event_channel(domain->domid,
+					    domain->xenstore_evtchn,
+					    xs_evtchn_cb,
+					    (void *)domain);
+	if (rc < 0) {
+		LOG_ERR("Failed to bind interdomain event channel (rc=%d)", rc);
+		goto unmap_ring;
+	}
+
+	domain->local_xenstore_evtchn = rc;
+
+	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid,
+			       domain->xenstore_evtchn);
+	if (rc) {
+		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
+		goto unmap_ring;
+	}
+
+	atomic_clear(&domain->xenstore_thrd_stop);
+
+	domain->xs_stack_slot = get_stack_idx();
+	domain->xenstore_tid =
+		k_thread_create(&domain->xenstore_thrd,
+				xenstore_thrd_stack[domain->xs_stack_slot],
+				XENSTORE_STACK_SIZE_PER_DOM,
+				xenstore_evt_thrd,
+				domain, NULL, NULL, 7, 0, K_NO_WAIT);
+
+	return 0;
+
+unmap_ring:
+	err_ret = xenmem_unmap_region(1, domain->domint);
+	if (err_ret < 0) {
+		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
+			domain->domid, err_ret);
+	}
+	return rc;
+}
+
+int stop_domain_stored(struct xen_domain *domain)
+{
+	int rc = 0, err = 0;
+
+	LOG_DBG("Destroy domain#%u", domain->domid);
+	atomic_set(&domain->xenstore_thrd_stop, 1);
+	k_sem_give(&domain->xb_sem);
+	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
+	free_stack_idx(domain->xs_stack_slot);
+	unbind_event_channel(domain->local_xenstore_evtchn);
+
+	rc = evtchn_close(domain->local_xenstore_evtchn);
+	if (rc) {
+		LOG_ERR("Unable to close event channel#%u (rc=%d)",
+			domain->local_xenstore_evtchn, rc);
+		err = rc;
+	}
+
+	rc = xenmem_unmap_region(1, domain->domint);
+	if (rc < 0) {
+		LOG_ERR("Failed to unmap domain#%u xenstore ring (rc=%d)",
+			domain->domid, rc);
+		err = rc;
+	}
+
+	return err;
 }
 
 static int xs_init_root(const struct device *d)
