@@ -112,7 +112,7 @@ struct xen_domain {
 	struct xen_domain_console console;
 	struct k_sem xb_sem;
 	struct k_thread xenstore_thrd;
-	bool xenstore_thrd_stop;
+	atomic_t xenstore_thrd_stop;
 	k_tid_t xenstore_tid;
 	evtchn_port_t xenstore_evtchn;
 	evtchn_port_t local_xenstore_evtchn;
