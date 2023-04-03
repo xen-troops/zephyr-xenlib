@@ -33,7 +33,6 @@ struct pending_watch_event_entry {
 	sys_dnode_t node;
 };
 
-void xenstore_evt_thrd(void *p1, void *p2, void *p3);
 int start_domain_stored(struct xen_domain *domain);
 int stop_domain_stored(struct xen_domain *domain);
 
