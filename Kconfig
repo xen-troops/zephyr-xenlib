@@ -84,3 +84,15 @@ config PFN_CHUNK_SIZE
 	help
 	  Chunk size for helper functions for mapping/unmapping
 	  memory from guest domain to Dom0.
+
+config XSTAT
+	bool "Enable XSTAT support"
+	help
+	  Enable xstat support
+
+if XSTAT
+config XSTAT_SHELL_CMDS
+	bool "Enable XSTAT shell commands"
+	help
+	  Enable set of XSTAT shell commands.
+endif
