@@ -990,6 +990,10 @@ int start_domain_stored(struct xen_domain *domain)
 {
 	int rc = 0, err_ret;
 
+	if (!domain) {
+		return -EINVAL;
+	}
+
 	rc = xenmem_map_region(domain->domid, 1,
 			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
 			       XENSTORE_PFN_OFFSET,
@@ -1046,6 +1050,10 @@ unmap_ring:
 int stop_domain_stored(struct xen_domain *domain)
 {
 	int rc = 0, err = 0;
+
+	if (!domain) {
+		return -EINVAL;
+	}
 
 	LOG_DBG("Destroy domain#%u", domain->domid);
 	atomic_set(&domain->xenstore_thrd_stop, 1);
