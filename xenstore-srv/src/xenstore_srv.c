@@ -293,7 +293,7 @@ static void send_errno(struct xen_domain *domain, uint32_t id, int err)
 	send_reply(domain, id, XS_ERROR, xsd_errors[i].errstring);
 }
 
-static int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
+static int fire_watcher(struct xen_domain *domain, char *key)
 {
 	struct watch_entry *iter, *next;
 	size_t kplen = strlen(key);
@@ -322,7 +322,7 @@ static int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 			memcpy(pload, key + klen + ioffset, kplen - klen);
 			memcpy(pload + kplen - klen + ooffset, iter->token, tlen);
 
-			send_reply_sz(domain, id, XS_WATCH_EVENT, pload, plen);
+			send_reply_sz(domain, 0, XS_WATCH_EVENT, pload, plen);
 
 			k_free(pload);
 		}
@@ -510,26 +510,21 @@ static void handle_mkdir(struct xen_domain *domain, uint32_t id, char *payload,
 	_handle_write(domain, id, XS_MKDIR, payload, len);
 }
 
-static void process_pending_watch_events(struct xen_domain *domain, uint32_t id)
+static void process_pending_watch_events(struct xen_domain *domain)
 {
 	struct pending_watch_event_entry *iter, *next;
 
 	k_mutex_lock(&pfl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&pending_watch_event_list, iter, next, node) {
-		/* TODO: check and simplify this if statements if possible */
-		if (domain == iter->domain) {
-			if (domain->running_transaction == 0 &&
-			    fire_watcher(domain, id, iter->key)) {
-				if (domain->pending_stop_transaction == true &&
-				    domain->stop_transaction_id == 0) {
-					continue;
-				}
-
-				k_free(iter->key);
-				sys_dlist_remove(&iter->node);
-				k_free(iter);
-			}
+		if (domain != iter->domain) {
+			continue;
 		}
+
+		fire_watcher(domain, iter->key);
+		k_free(iter->key);
+		sys_dlist_remove(&iter->node);
+		k_free(iter);
+
 	}
 	k_mutex_unlock(&pfl_mutex);
 }
@@ -928,12 +923,14 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 	domain->pending_stop_transaction = false;
 
 	while (!atomic_get(&domain->xenstore_thrd_stop)) {
-		process_pending_watch_events(domain, domain->running_transaction);
-
 		if (domain->pending_stop_transaction) {
 			send_reply(domain, domain->stop_transaction_id, XS_TRANSACTION_END, "");
 			domain->stop_transaction_id = 0;
 			domain->pending_stop_transaction = false;
+		}
+
+		if (!domain->running_transaction) {
+			process_pending_watch_events(domain);
 		}
 
 		if (intf->req_prod <= intf->req_cons)
