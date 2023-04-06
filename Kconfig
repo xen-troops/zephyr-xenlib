@@ -117,3 +117,8 @@ config DOM_MAX
 	range 1 32
 	help
 	  Maximum number of DomU that can be created and launched.
+
+config XSTAT
+	bool "Enable XSTAT support"
+	help
+	  Enable xstat support which allows statistic information about running domains
