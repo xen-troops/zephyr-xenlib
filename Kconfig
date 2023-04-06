@@ -104,3 +104,8 @@ config MAX_DOM_NAME_SIZE
 	help
 	  Maximum length of domain name
 
+config XSTAT_SHELL_CMDS
+	depends on XSTAT
+	bool "Enable XSTAT shell commands"
+	help
+	  Enable set of XSTAT shell commands.
