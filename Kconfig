@@ -91,3 +91,16 @@ config DOM_MAX
 	range 1 32
 	help
 	  Maximum number of DomU that can be created and launched.
+
+config XSTAT
+	bool "Enable XSTAT support"
+	help
+	  Enable xstat support
+
+config MAX_DOM_NAME_SIZE
+	int "Maximum domain name size"
+	default 10
+	range 10 40
+	help
+	  Maximum length of domain name
+
