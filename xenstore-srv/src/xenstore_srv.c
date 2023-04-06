@@ -514,6 +514,7 @@ static void process_pending_watch_events(struct xen_domain *domain)
 {
 	struct pending_watch_event_entry *iter, *next;
 
+	k_mutex_lock(&wel_mutex, K_FOREVER);
 	k_mutex_lock(&pfl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&pending_watch_event_list, iter, next, node) {
 		if (domain != iter->domain) {
@@ -527,6 +528,7 @@ static void process_pending_watch_events(struct xen_domain *domain)
 
 	}
 	k_mutex_unlock(&pfl_mutex);
+	k_mutex_unlock(&wel_mutex);
 }
 
 static void handle_control(struct xen_domain *domain, uint32_t id,
