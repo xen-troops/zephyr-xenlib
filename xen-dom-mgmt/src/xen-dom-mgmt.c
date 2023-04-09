@@ -674,6 +674,10 @@ static void initialize_xenstore(uint32_t domid,
 	sprintf(rbuffer, "%d", domid);
 	xss_write(lbuffer, rbuffer);
 
+	sprintf(lbuffer, "%s/%d/name", basepref, domid);
+	sprintf(rbuffer, "%s", domain->name);
+	xss_write(lbuffer, rbuffer);
+
 	for (int i = 0; dirs[i]; ++i) {
 		sprintf(lbuffer, "%s/%d/%s", basepref, domid, dirs[i]);
 		xss_write(lbuffer, "");
@@ -717,6 +721,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	memset(domain, 0, sizeof(*domain));
 	domain->domid = domid;
 
+	snprintf(domain->name, CONFIG_MAX_DOM_NAME_SIZE, "%s", domcfg->name);
 	rc = xen_domctl_max_vcpus(domid, domcfg->max_vcpus);
 	if (rc) {
 		LOG_ERR("Failed to set max vcpus for domain#%u (rc=%d)", domid, rc);

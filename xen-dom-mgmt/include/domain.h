@@ -40,6 +40,7 @@ typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
 struct xen_domain_cfg {
+	char name[CONFIG_MAX_DOM_NAME_SIZE];
 	uint64_t mem_kb;
 
 	uint32_t flags;
@@ -101,6 +102,7 @@ struct xen_domain_console {
 
 struct xen_domain {
 	uint32_t domid;
+	char name[CONFIG_MAX_DOM_NAME_SIZE];
 	struct xenstore_domain_interface *domint;
 	int num_vcpus;
 	int address_size;

@@ -53,6 +53,7 @@ struct vm_spec {
 	struct hypervisor_spec hypervisor;
 	struct kernel_spec kernel;
 	struct hwconfig_spec hwconfig;
+	const char *domainname;
 };
 
 struct domain_spec {
@@ -65,6 +66,7 @@ struct container {
 
 	char container_id[CONTAINER_NAME_SIZE];
 	const char *bundle;
+	char vm_name[CONFIG_MAX_DOM_NAME_SIZE];
 
 	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE] __aligned(8);
 	char *cmdline;
@@ -101,7 +103,7 @@ static const struct json_obj_descr vm_spec_descr[] = {
 			      hypervisor, hypervisor_spec_descr),
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec, kernel, kernel_spec_descr),
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec, hwconfig, hwconfig_spec_descr),
-
+	JSON_OBJ_DESCR_PRIM(struct vm_spec, domainname, JSON_TOK_STRING),
 };
 
 static const struct json_obj_descr domain_spec_descr[] = {
@@ -250,6 +252,7 @@ static int fill_domcfg(struct container *container)
 	}
 	domcfg = &container->domcfg;
 
+	snprintf(domcfg->name, CONFIG_MAX_DOM_NAME_SIZE, "%s", container->vm_name);
 	/*
 	 * TODO: Memory and cpu configuration should be read
 	 * from json spec. Hardcoding those parameters because
@@ -449,6 +452,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 
 	k_free(fpath);
 
+	memset(&spec, 0, sizeof(spec));
 	ret = parse_config_json(config, bytes_read, &spec);
 	if (ret < 0) {
 		goto err_config;
@@ -463,6 +467,13 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	}
 
 	container->has_dt_image = strlen(spec.vm.hwconfig.devicetree) > 0;
+
+	if (spec.vm.domainname) {
+		snprintf(container->vm_name, CONFIG_MAX_DOM_NAME_SIZE, "%s", spec.vm.domainname);
+	} else {
+		snprintf(container->vm_name, CONFIG_MAX_DOM_NAME_SIZE, "Dom#%lld",
+					container->domid);
+	}
 
 	if (container->has_dt_image) {
 		ret = snprintf(container->dt_image,
