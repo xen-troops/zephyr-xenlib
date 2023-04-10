@@ -113,6 +113,10 @@ static bool is_root_path(const char *path)
 	return (is_abs_path(path) && (strlen(path) == 1));
 }
 
+/*
+ * Should be called with xsel_mutex lock and unlock mutex
+ * only after all actions with entry will be performed.
+ */
 static struct xs_entry *key_to_entry(const char *key)
 {
 	char *tok, *tok_state;
@@ -652,12 +656,16 @@ static void handle_read(struct xen_domain *domain, uint32_t id, char *payload,
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	entry = key_to_entry(path);
 
 	if (entry) {
 		send_reply_read(domain, id, XS_READ, entry->value ? entry->value : "");
+		k_mutex_unlock(&xsel_mutex);
 		return;
 	}
+
+	k_mutex_unlock(&xsel_mutex);
 
 	send_reply(domain, id, XS_ERROR, "ENOENT");
 }
@@ -683,10 +691,17 @@ static void remove_recurse(sys_dlist_t *chlds)
 	}
 }
 
-static int xss_do_rm(struct xs_entry *entry)
+static int xss_do_rm(const char *key)
 {
-	if (!entry)
+	sys_dlist_t child;
+	struct xs_entry *entry;
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(key);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
 		return -EINVAL;
+	}
 
 	if (entry->key) {
 		k_free(entry->key);
@@ -698,26 +713,25 @@ static int xss_do_rm(struct xs_entry *entry)
 		entry->value = NULL;
 	}
 
-	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	sys_dlist_remove(&entry->node);
-	sys_dlist_t chlds = entry->child_list;
+	child = entry->child_list;
 
 	k_free(entry);
 	k_mutex_unlock(&xsel_mutex);
 
-	remove_recurse(&chlds);
+	remove_recurse(&child);
 	return 0;
 }
 
 int xss_rm(const char *path)
 {
-	return xss_do_rm(key_to_entry(path));
+	return xss_do_rm(path);
 }
 
 static void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
 	       uint32_t len)
 {
-	xss_do_rm(key_to_entry(payload));
+	xss_do_rm(payload);
 	send_reply_read(domain, id, XS_RM, "");
 }
 
