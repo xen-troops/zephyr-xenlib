@@ -123,18 +123,26 @@ static struct xs_entry *key_to_entry(const char *key)
 	char *tok, *tok_state;
 	struct xs_entry *next, *iter = NULL;
 	sys_dlist_t *inspected_list = &root_xenstore.child_list;
-	char key_buffer[XENSTORE_ABS_PATH_MAX + 1];
+	char *key_buffer;
 	size_t keyl;
 
-	if (!key)
+	if (!key) {
 		return NULL;
+	}
 
 	keyl = strlen(key);
-	if (keyl > XENSTORE_ABS_PATH_MAX)
+	if (keyl > XENSTORE_ABS_PATH_MAX) {
 		return NULL;
+	}
 
 	if (is_root_path(key)) {
 		return &root_xenstore;
+	}
+
+	key_buffer = k_malloc(keyl + 1);
+	if (!key_buffer) {
+		LOG_ERR("Failed to allocate memory for path");
+		return NULL;
 	}
 
 	strncpy(key_buffer, key, keyl + 1);
@@ -153,6 +161,8 @@ static struct xs_entry *key_to_entry(const char *key)
 
 		inspected_list = &iter->child_list;
 	}
+
+	k_free(key_buffer);
 
 	return iter;
 }
