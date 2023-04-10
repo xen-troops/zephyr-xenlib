@@ -34,14 +34,15 @@ static uint32_t used_threads;
 static K_MUTEX_DEFINE(xs_stack_lock);
 BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOM_MAX);
 
-K_MUTEX_DEFINE(xsel_mutex);
-K_MUTEX_DEFINE(pfl_mutex);
-K_MUTEX_DEFINE(wel_mutex);
+static K_MUTEX_DEFINE(xsel_mutex);
+static K_MUTEX_DEFINE(pfl_mutex);
+static K_MUTEX_DEFINE(wel_mutex);
 
-sys_dlist_t watch_entry_list = SYS_DLIST_STATIC_INIT(&watch_entry_list);
-sys_dlist_t pending_watch_event_list = SYS_DLIST_STATIC_INIT(&pending_watch_event_list);
+static sys_dlist_t watch_entry_list = SYS_DLIST_STATIC_INIT(&watch_entry_list);
+static sys_dlist_t pending_watch_event_list =
+		   SYS_DLIST_STATIC_INIT(&pending_watch_event_list);
 
-struct xs_entry root_xenstore;
+static struct xs_entry root_xenstore;
 
 struct message_handle {
 	void (*h)(struct xen_domain *domain, uint32_t id, char *payload, uint32_t sz);
