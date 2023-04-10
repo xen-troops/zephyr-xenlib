@@ -357,22 +357,28 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 	return 0;
 }
 
-void xss_do_write(const char *const_path, const char *data)
+static int xss_do_write(const char *const_path, const char *data)
 {
+	int rc = 0;
 	struct xs_entry *iter = NULL;
 	char *path;
 	char *tok, *tok_state;
-	size_t vall = strlen(data) + 1;
+	size_t data_len = strlen(data) + 1;
 	size_t namelen;
+	sys_dlist_t *inspected_list;
 
 	path = k_malloc(strlen(const_path) + 1);
-	strcpy(path, const_path);
+	if (!path) {
+		LOG_ERR("Failed to allocate memory for path\n");
+		return -ENOMEM;
+	}
 
+	strcpy(path, const_path);
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	sys_dlist_t *inspected_list = &root_xenstore.child_list;
+	inspected_list = &root_xenstore.child_list;
 
 	for (tok = strtok_r(path, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
-		SYS_DLIST_FOR_EACH_CONTAINER (inspected_list, iter, node) {
+		SYS_DLIST_FOR_EACH_CONTAINER(inspected_list, iter, node) {
 			if (strcmp(iter->key, tok) == 0) {
 				break;
 			}
@@ -380,9 +386,19 @@ void xss_do_write(const char *const_path, const char *data)
 
 		if (iter == NULL) {
 			iter = k_malloc(sizeof(*iter));
+			if (!iter) {
+				LOG_ERR("Failed to allocate memory for xs entry");
+				rc = -ENOMEM;
+				goto out;
+			}
 
 			namelen = strlen(tok);
 			iter->key = k_malloc(namelen + 1);
+			if (!iter->key) {
+				k_free(iter);
+				rc = -ENOMEM;
+				goto out;
+			}
 			memcpy(iter->key, tok, namelen);
 			iter->key[namelen] = 0;
 			iter->value = NULL;
@@ -395,22 +411,36 @@ void xss_do_write(const char *const_path, const char *data)
 		inspected_list = &iter->child_list;
 	}
 
-	if (iter && vall > 0) {
+	if (iter && data_len > 0) {
 		if (iter->value != NULL) {
 			k_free(iter->value);
 		}
 
-		iter->value = k_malloc(vall);
-		memcpy(iter->value, data, vall);
+		iter->value = k_malloc(data_len);
+		if (!iter->value) {
+			LOG_ERR("Failed to allocate memory for xs entry value");
+			rc = -ENOMEM;
+			goto out;
+		}
+		memcpy(iter->value, data, data_len);
 	}
 
+out:
 	k_mutex_unlock(&xsel_mutex);
+	k_free(path);
+
+	return rc;
 }
 
 int xss_write(const char *path, const char *value)
 {
-	xss_do_write(path, value);
-	return 0;
+	int rc = xss_do_write(path, value);
+
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+	}
+
+	return rc;
 }
 
 int xss_read(const char *path, char *value, size_t len)
@@ -497,6 +527,7 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 			  uint32_t msg_type, char *payload,
 			  uint32_t len)
 {
+	int rc = 0;
 	char path[STRING_LENGTH_MAX];
 	char *data;
 	uint32_t data_offset = strlen(payload) + 1;
@@ -516,7 +547,12 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 	}
 
 	data[len - data_offset] = 0;
-	xss_do_write(path, data);
+	rc = xss_do_write(path, data);
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+		send_errno(domain, id, rc);
+		return;
+	}
 
 	send_reply(domain, id, msg_type, "OK");
 
