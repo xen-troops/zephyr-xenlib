@@ -22,6 +22,9 @@
 
 LOG_MODULE_REGISTER(xenstore);
 
+/* max length of string that holds '/local/domain/%domid/' (domid 0-32767) */
+#define XENSTORE_MAX_LOCALPATH_LEN	21
+
 #define XENSTORE_STACK_SIZE_PER_DOM	4096
 static K_THREAD_STACK_ARRAY_DEFINE(xenstore_thrd_stack,
 				   CONFIG_DOM_MAX,
@@ -293,42 +296,54 @@ static void send_errno(struct xen_domain *domain, uint32_t id, int err)
 	send_reply(domain, id, XS_ERROR, xsd_errors[i].errstring);
 }
 
-static int fire_watcher(struct xen_domain *domain, char *key)
+static int fire_watcher(struct xen_domain *domain, char *pending_path)
 {
-	struct watch_entry *iter, *next;
-	size_t kplen = strlen(key);
-	char local[STRING_LENGTH_MAX];
-	snprintf(local, STRING_LENGTH_MAX, "/local/domain/%d", domain->domid);
-	size_t loclen = strlen(local);
+	struct watch_entry *iter;
+	char local[XENSTORE_MAX_LOCALPATH_LEN];
+	size_t pendkey_len, loc_len;
 
-	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&watch_entry_list, iter, next, node) {
-		size_t klen = strlen(iter->key);
-		if (memcmp(iter->key, key, klen) == 0) {
-			size_t ioffset = 1;
-			size_t ooffset = 0;
-			if (iter->is_relative)
-				klen = loclen;
-			else {
-				klen = 0;
-				ioffset = 0;
-				ooffset = 1;
-			}
+	pendkey_len = strlen(pending_path);
 
-			size_t tlen = strlen(iter->token);
-			size_t plen = tlen + kplen - klen + 1 + ooffset;
-			char *pload = k_malloc(plen);
+	loc_len = snprintf(local, sizeof(local), "/local/domain/%d/",
+			   domain->domid);
+	__ASSERT_NO_MSG(loc_len < sizeof(local));
 
-			memset(pload, 0, plen);
-			memcpy(pload, key + klen + ioffset, kplen - klen);
-			memcpy(pload + kplen - klen + ooffset, iter->token, tlen);
+	/* This function should be called when we already hold wel_mutex */
+	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
+		char *payload, *epath_buf = pending_path;
+		size_t token_len, payload_len;
+		size_t epath_len = pendkey_len + 1;
 
-			send_reply_sz(domain, 0, XS_WATCH_EVENT, pload, plen);
-
-			k_free(pload);
+		if (memcmp(iter->key, epath_buf, strlen(iter->key))) {
+			continue;
 		}
+
+		token_len = strlen(iter->token);
+		payload_len = token_len + 1;
+
+		if (iter->is_relative) {
+			/* Send relative part (after "/local/domain/#domid") */
+			epath_buf += loc_len;
+			epath_len -= loc_len;
+		}
+		payload_len += epath_len;
+
+		payload = k_malloc(payload_len);
+		if (!payload) {
+			return -ENOMEM;
+		}
+
+		memset(payload, 0, payload_len);
+		/* Need to pack payload as "<epath>|<token>|" */
+		memcpy(payload, epath_buf, epath_len);
+		memcpy(payload + epath_len, iter->token, token_len);
+
+		send_reply_sz(domain, 0, XS_WATCH_EVENT, payload, payload_len);
+
+		k_free(payload);
 	}
 
-	return 1;
+	return 0;
 }
 
 void xss_do_write(const char *const_path, const char *data)
@@ -517,16 +532,24 @@ static void process_pending_watch_events(struct xen_domain *domain)
 	k_mutex_lock(&wel_mutex, K_FOREVER);
 	k_mutex_lock(&pfl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&pending_watch_event_list, iter, next, node) {
+		int rc;
+
 		if (domain != iter->domain) {
 			continue;
 		}
 
-		fire_watcher(domain, iter->key);
+		rc = fire_watcher(domain, iter->key);
+		if (rc < 0) {
+			LOG_ERR("Failed to send watch event, err = %d", rc);
+			goto out;
+		}
+
 		k_free(iter->key);
 		sys_dlist_remove(&iter->node);
 		k_free(iter);
 
 	}
+out:
 	k_mutex_unlock(&pfl_mutex);
 	k_mutex_unlock(&wel_mutex);
 }
