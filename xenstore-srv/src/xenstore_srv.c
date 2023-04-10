@@ -99,10 +99,22 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 	return NULL;
 }
 
+static bool is_abs_path(const char *path)
+{
+	if (!path) {
+		return false;
+	}
+
+	return path[0] == '/';
+}
+
+static bool is_root_path(const char *path)
+{
+	return (is_abs_path(path) && (strlen(path) == 1));
+}
+
 static struct xs_entry *key_to_entry(const char *key)
 {
-	static const char rootdir[] = "/";
-
 	char *tok, *tok_state;
 	struct xs_entry *next, *iter = NULL;
 	sys_dlist_t *inspected_list = &root_xenstore.child_list;
@@ -116,7 +128,7 @@ static struct xs_entry *key_to_entry(const char *key)
 	if (keyl > XENSTORE_ABS_PATH_MAX)
 		return NULL;
 
-	if (strncmp(rootdir, key, keyl) == 0) {
+	if (is_root_path(key)) {
 		return &root_xenstore;
 	}
 
@@ -251,10 +263,9 @@ static void handle_directory(struct xen_domain *domain, uint32_t id,
 			     char *payload, uint32_t len)
 {
 	size_t data_offset = strlen(payload) + 1;
-	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
 
-	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
+	if (is_abs_path(payload)) {
 		memcpy(path, payload, data_offset);
 	} else {
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
@@ -486,7 +497,6 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 			  uint32_t msg_type, char *payload,
 			  uint32_t len)
 {
-	char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
 	char *data;
 	uint32_t data_offset = strlen(payload) + 1;
@@ -499,7 +509,7 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 		return;
 	}
 
-	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
+	if (is_abs_path(payload)) {
 		memcpy(path, payload, data_offset);
 	} else {
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
@@ -597,11 +607,10 @@ static void handle_reset_watches(struct xen_domain *domain, uint32_t id,
 static void handle_read(struct xen_domain *domain, uint32_t id, char *payload,
 			uint32_t len)
 {
-	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
 	struct xs_entry *entry;
 
-	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
+	if (is_abs_path(payload)) {
 		memcpy(path, payload, strlen(payload) + 1);
 	} else {
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
@@ -679,15 +688,12 @@ static void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
 static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
 			 uint32_t len)
 {
-	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX];
 	char token[STRING_LENGTH_MAX];
 	struct watch_entry *wentry;
 	struct pending_watch_event_entry *pentry;
 	size_t plen = 0, full_plen;
-	bool path_is_relative;
-
-	path_is_relative = !!(memcmp(payload, localpath, strlen(localpath)));
+	bool path_is_relative = !is_abs_path(payload);
 
 	/*
 	 * Path and token come inside payload char * and are separated
@@ -812,7 +818,6 @@ pentry_fail:
 static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 			   char *payload, uint32_t len)
 {
-	const char localpath[] = "/";
 	char path[STRING_LENGTH_MAX] = { 0 };
 	char token[STRING_LENGTH_MAX] = { 0 };
 	size_t plen = 0;
@@ -820,7 +825,7 @@ static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 		;
 	plen += 1;
 
-	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
+	if (is_abs_path(payload)) {
 		memcpy(path, payload, plen);
 	} else {
 		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
