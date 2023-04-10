@@ -82,7 +82,10 @@ static void free_stack_idx(int idx)
 	k_mutex_unlock(&xs_stack_lock);
 }
 
-
+/*
+ * Should be called with wel_mutex lock and unlock mutex
+ * only after all actions with entry will be performed.
+ */
 struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 {
 	struct watch_entry *iter;
@@ -882,6 +885,7 @@ static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 	char path[STRING_LENGTH_MAX] = { 0 };
 	char token[STRING_LENGTH_MAX] = { 0 };
 	size_t plen = 0;
+	struct watch_entry *entry;
 	for (; plen < len && payload[plen] != '\0'; ++plen)
 		;
 	plen += 1;
@@ -893,15 +897,15 @@ static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 	}
 
 	memcpy(token, payload + plen, len - plen);
-	struct watch_entry *entry = key_to_watcher(path, true, token);
+	k_mutex_lock(&wel_mutex, K_FOREVER);
+	entry = key_to_watcher(path, true, token);
 
 	if (entry) {
 		if (entry->domain == domain) {
-			k_mutex_lock(&wel_mutex, K_FOREVER);
 			remove_watch_entry(entry);
-			k_mutex_unlock(&wel_mutex);
 		}
 	}
+	k_mutex_unlock(&wel_mutex);
 
 	send_reply(domain, id, XS_UNWATCH, "");
 }
