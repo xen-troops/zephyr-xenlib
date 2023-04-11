@@ -66,7 +66,7 @@ struct container {
 	char container_id[CONTAINER_NAME_SIZE];
 	const char *bundle;
 
-	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE];
+	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE] __aligned(8);
 	char *cmdline;
 
 	uint64_t domid;
