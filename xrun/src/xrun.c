@@ -89,7 +89,7 @@ struct container {
 	char container_id[CONTAINER_NAME_SIZE];
 	const char *bundle;
 
-	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE];
+	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE] __aligned(8);
 
 	uint64_t domid;
 	char kernel_image[CONFIG_XRUN_MAX_PATH_SIZE];
