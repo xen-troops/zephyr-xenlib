@@ -104,6 +104,12 @@ config MAX_DOM_NAME_SIZE
 	help
 	  Maximum length of domain name
 
+config DOM0_NAME
+	string "Initial name"
+	default "Domain-0"
+	help
+	  Name of initial domain (dom0)
+
 config XSTAT_SHELL_CMDS
 	depends on XSTAT
 	bool "Enable XSTAT shell commands"

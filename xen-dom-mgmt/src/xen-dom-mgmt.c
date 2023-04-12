@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/init.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/dom0/zimage.h>
@@ -35,7 +36,11 @@
 #include <xen_console.h>
 #include <xss.h>
 
+#include <xstat.h>
+
 LOG_MODULE_REGISTER(xen_dom_mgmt);
+
+#define DOM0_XENSTORE_PRIORITY 45
 
 extern struct xen_domain_cfg domd_cfg;
 
@@ -616,11 +621,11 @@ static void initialize_xenstore(uint32_t domid,
 				const struct xen_domain_cfg *domcfg,
 				const struct xen_domain *domain)
 {
-	char lbuffer[256] = { 0 };
-	char rbuffer[256] = { 0 };
+	char lbuffer[80] = { 0 };
+	char rbuffer[80] = { 0 };
 	char uuid[40];
-	char basepref[] = "/local/domain";
-	char *dirs[] = { "data",
+	static const char basepref[] = "/local/domain";
+	static const char * const dirs[] = { "data",
 			 "drivers",
 			 "feature",
 			 "attr",
@@ -660,11 +665,6 @@ static void initialize_xenstore(uint32_t domid,
 	sprintf(lbuffer, "%s/%d/vm", basepref, domid);
 	xss_write(lbuffer, uuid);
 
-	sprintf(lbuffer, "/vm/%s/name", uuid);
-	sprintf(rbuffer, "zephyr-%d", domid);
-	xss_write(lbuffer, rbuffer);
-	sprintf(lbuffer, "/local/domain/%d/name", domid);
-	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/vm/%s/start_time", uuid);
 	xss_write(lbuffer, "0");
 	sprintf(lbuffer, "/vm/%s/uuid", uuid);
@@ -677,6 +677,8 @@ static void initialize_xenstore(uint32_t domid,
 	sprintf(lbuffer, "%s/%d/name", basepref, domid);
 	sprintf(rbuffer, "%s", domain->name);
 	xss_write(lbuffer, rbuffer);
+	sprintf(lbuffer, "/vm/%s/name", uuid);
+	xss_write(lbuffer, rbuffer);
 
 	for (int i = 0; dirs[i]; ++i) {
 		sprintf(lbuffer, "%s/%d/%s", basepref, domid, dirs[i]);
@@ -687,6 +689,34 @@ static void initialize_xenstore(uint32_t domid,
 	xss_write(lbuffer, "qemu_xen_traditional");
 	sprintf(lbuffer, "/libxl/%d/type", domid);
 	xss_write(lbuffer, "pvh");
+}
+
+static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
+{
+	int ret;
+	static struct xen_domain_cfg dom0cfg;
+	static struct xen_domain dom0;
+	static struct xenstat_domain dom0stat;
+
+	ret = xstat_getdominfo(&dom0stat, 0, 1);
+	if (ret < 0) {
+		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
+		return ret;
+	}
+	if (ret == 0) {
+		/* Theoretically impossible */
+		return -EINVAL;
+	}
+
+	memset(&dom0cfg, 0, sizeof(dom0cfg));
+	memset(&dom0, 0, sizeof(dom0));
+	snprintf(dom0cfg.name, CONFIG_MAX_DOM_NAME_SIZE, "%s", CONFIG_DOM0_NAME);
+	snprintf(dom0.name, CONFIG_MAX_DOM_NAME_SIZE, "%s", CONFIG_DOM0_NAME);
+	dom0cfg.max_vcpus = dom0stat.num_vcpus;
+	dom0cfg.mem_kb = dom0stat.cur_mem / 1024;
+	dom0.max_mem_kb = dom0stat.cur_mem / 1024;
+	initialize_xenstore(0, &dom0cfg, &dom0);
+	return 0;
 }
 
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
@@ -913,3 +943,5 @@ int domain_unpause(uint32_t domid)
 
 	return xen_domctl_unpausedomain(domid);
 }
+
+SYS_INIT(initialize_dom0_xenstore, APPLICATION, DOM0_XENSTORE_PRIORITY);
