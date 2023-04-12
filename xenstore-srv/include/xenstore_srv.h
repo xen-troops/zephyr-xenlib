@@ -7,8 +7,6 @@
 #ifndef XENLIB_XENSTORE_SRV_H
 #define XENLIB_XENSTORE_SRV_H
 
-#define STRING_LENGTH_MAX 128
-
 struct xs_entry {
 	char *key;
 	char *value;

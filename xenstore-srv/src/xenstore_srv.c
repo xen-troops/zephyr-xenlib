@@ -22,6 +22,8 @@
 
 LOG_MODULE_REGISTER(xenstore);
 
+/* Max string length of int32_t + terminating null symbol */
+#define INT32_MAX_STR_LEN (12)
 /* max length of string that holds '/local/domain/%domid/' (domid 0-32767) */
 #define XENSTORE_MAX_LOCALPATH_LEN	21
 
@@ -115,6 +117,44 @@ static bool is_abs_path(const char *path)
 static bool is_root_path(const char *path)
 {
 	return (is_abs_path(path) && (strlen(path) == 1));
+}
+
+/*
+ * Returns the size of string including terminating NULL symbol.
+ */
+static inline size_t str_byte_size(const char *str)
+{
+	if (!str) {
+		return 0;
+	}
+
+	return strlen(str) + 1;
+}
+
+static int construct_path(char *payload, uint32_t domid, char **path)
+{
+	size_t path_len = str_byte_size(payload);
+
+	if (path_len > XENSTORE_ABS_PATH_MAX) {
+		LOG_ERR("Invalid path len (path len = %zu, max = %d)",
+			path_len, XENSTORE_ABS_PATH_MAX);
+		return -ENOMEM;
+	}
+
+	*path = k_malloc(path_len + XENSTORE_MAX_LOCALPATH_LEN);
+	if (!*path) {
+		LOG_ERR("Failed to allocate memory for path");
+		return -ENOMEM;
+	}
+
+	if (is_abs_path(payload)) {
+		memcpy(*path, payload, path_len);
+	} else {
+		snprintf(*path, path_len + XENSTORE_MAX_LOCALPATH_LEN,
+			 "/local/domain/%d/%s", domid, payload);
+	}
+
+	return 0;
 }
 
 /*
@@ -268,45 +308,13 @@ static void send_reply_sz(struct xen_domain *domain, uint32_t id,
 static void send_reply(struct xen_domain *domain, uint32_t id,
 		       uint32_t msg_type, const char *payload)
 {
-	send_reply_sz(domain, id, msg_type, payload, strlen(payload) + 1);
+	send_reply_sz(domain, id, msg_type, payload, str_byte_size(payload));
 }
 
 static void send_reply_read(struct xen_domain *domain, uint32_t id,
 			    uint32_t msg_type, char *payload)
 {
 	send_reply_sz(domain, id, msg_type, payload, strlen(payload));
-}
-
-static void handle_directory(struct xen_domain *domain, uint32_t id,
-			     char *payload, uint32_t len)
-{
-	size_t data_offset = strlen(payload) + 1;
-	char path[STRING_LENGTH_MAX];
-
-	if (is_abs_path(payload)) {
-		memcpy(path, payload, data_offset);
-	} else {
-		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
-	}
-
-	char dirlist[256] = { 0 };
-	size_t reply_sz = 0;
-
-	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	struct xs_entry *entry = key_to_entry(path);
-
-	if (entry) {
-		struct xs_entry *iter;
-
-		SYS_DLIST_FOR_EACH_CONTAINER (&entry->child_list, iter, node) {
-			size_t keyl = strlen(iter->key) + 1;
-			memcpy(dirlist + reply_sz, iter->key, keyl);
-			reply_sz += keyl;
-		}
-	}
-
-	k_mutex_unlock(&xsel_mutex);
-	send_reply_sz(domain, id, XS_DIRECTORY, dirlist, reply_sz);
 }
 
 static void send_errno(struct xen_domain *domain, uint32_t id, int err)
@@ -323,6 +331,55 @@ static void send_errno(struct xen_domain *domain, uint32_t id, int err)
 	}
 
 	send_reply(domain, id, XS_ERROR, xsd_errors[i].errstring);
+}
+
+static void handle_directory(struct xen_domain *domain, uint32_t id,
+			     char *payload, uint32_t len)
+{
+	char *dir_list = NULL;
+	size_t reply_sz = 0, dir_name_len;
+	char *path;
+	struct xs_entry *entry, *iter;
+	int rc;
+
+	rc = construct_path(payload, domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(domain, id, rc);
+		return;
+	}
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(path);
+	k_free(path);
+	if (!entry) {
+		goto out;
+	}
+
+	/* Calculate total length of dirs child node names */
+	SYS_DLIST_FOR_EACH_CONTAINER(&entry->child_list, iter, node) {
+		reply_sz += str_byte_size(iter->key);
+	}
+
+	dir_list = k_malloc(reply_sz);
+	if (!dir_list) {
+		LOG_ERR("Failed to allocate memory for dir list");
+		send_reply(domain, id, XS_ERROR, "ENOMEM");
+		k_mutex_unlock(&xsel_mutex);
+		return;
+	}
+
+	reply_sz = 0;
+	SYS_DLIST_FOR_EACH_CONTAINER(&entry->child_list, iter, node) {
+		dir_name_len = str_byte_size(iter->key);
+		memcpy(dir_list + reply_sz, iter->key, dir_name_len);
+		reply_sz += dir_name_len;
+	}
+
+out:
+	k_mutex_unlock(&xsel_mutex);
+	send_reply_sz(domain, id, XS_DIRECTORY, dir_list, reply_sz);
+	k_free(dir_list);
 }
 
 static int fire_watcher(struct xen_domain *domain, char *pending_path)
@@ -381,11 +438,11 @@ static int xss_do_write(const char *const_path, const char *data)
 	struct xs_entry *iter = NULL;
 	char *path;
 	char *tok, *tok_state;
-	size_t data_len = strlen(data) + 1;
+	size_t data_len = str_byte_size(data);
 	size_t namelen;
 	sys_dlist_t *inspected_list;
 
-	path = k_malloc(strlen(const_path) + 1);
+	path = k_malloc(str_byte_size(const_path));
 	if (!path) {
 		LOG_ERR("Failed to allocate memory for path\n");
 		return -ENOMEM;
@@ -481,7 +538,7 @@ int xss_read(const char *path, char *value, size_t len)
 int xss_read_integer(const char *path, int *value)
 {
 	int rc;
-	char ns[32] = { 0 };
+	char ns[INT32_MAX_STR_LEN] = { 0 };
 
 	rc = xss_read(path, ns, sizeof(ns));
 	if (!rc)
@@ -511,7 +568,7 @@ static void notify_watchers(const char *path, uint32_t caller_domid)
 			goto pentry_fail;
 		}
 
-		pentry->key = k_malloc(strlen(path) + 1);
+		pentry->key = k_malloc(str_byte_size(path));
 		if (!pentry->key) {
 			goto pkey_fail;
 		}
@@ -546,35 +603,38 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 			  uint32_t len)
 {
 	int rc = 0;
-	char path[STRING_LENGTH_MAX];
+	char *path;
 	char *data;
-	uint32_t data_offset = strlen(payload) + 1;
+	size_t path_len = str_byte_size(payload);
 
-	data = payload + data_offset;
-
-	if (len < data_offset) {
-		LOG_ERR("Data size mismatch");
-		send_errno(domain, id, EINVAL);
+	rc = construct_path(payload, domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(domain, id, rc);
 		return;
 	}
 
-	if (is_abs_path(payload)) {
-		memcpy(path, payload, data_offset);
-	} else {
-		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
+	data = payload + path_len;
+	if (len < path_len) {
+		LOG_ERR("Data size mismatch");
+		send_errno(domain, id, EINVAL);
+		k_free(path);
+		return;
 	}
 
-	data[len - data_offset] = 0;
+	data[len - path_len] = 0;
 	rc = xss_do_write(path, data);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 		send_errno(domain, id, rc);
+		k_free(path);
 		return;
 	}
 
 	send_reply(domain, id, msg_type, "OK");
 
 	notify_watchers(path, domain->domid);
+	k_free(path);
 }
 
 static void handle_write(struct xen_domain *domain, uint32_t id, char *payload,
@@ -661,17 +721,20 @@ static void handle_reset_watches(struct xen_domain *domain, uint32_t id,
 static void handle_read(struct xen_domain *domain, uint32_t id, char *payload,
 			uint32_t len)
 {
-	char path[STRING_LENGTH_MAX];
+	char *path;
 	struct xs_entry *entry;
+	int rc;
 
-	if (is_abs_path(payload)) {
-		memcpy(path, payload, strlen(payload) + 1);
-	} else {
-		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
+	rc = construct_path(payload, domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(domain, id, rc);
+		return;
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	entry = key_to_entry(path);
+	k_free(path);
 
 	if (entry) {
 		send_reply_read(domain, id, XS_READ, entry->value ? entry->value : "");
@@ -752,39 +815,30 @@ static void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
 static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
 			 uint32_t len)
 {
-	char path[STRING_LENGTH_MAX];
-	char token[STRING_LENGTH_MAX];
+	char *path;
+	char *token;
 	struct watch_entry *wentry;
 	struct pending_watch_event_entry *pentry;
-	size_t plen = 0, full_plen;
+	size_t path_len = 0, full_plen;
 	bool path_is_relative = !is_abs_path(payload);
+	int rc;
 
 	/*
 	 * Path and token come inside payload char * and are separated
 	 * with '\0', so we can find path len with strnlen here.
 	 */
-	plen = strnlen(payload, len) + 1;
-	if (plen > STRING_LENGTH_MAX) {
+	path_len = strnlen(payload, len) + 1;
+	if (path_len > XENSTORE_ABS_PATH_MAX) {
 		goto path_fail;
 	}
 
-	if (path_is_relative) {
-		full_plen = snprintf(path, sizeof(path), "/local/domain/%d/%s",
-			 domain->domid, payload);
-		if (full_plen < 0) {
-			goto path_fail;
-		}
-
-		/* Add symbol for trailing '\0', skipped by snprintf */
-		full_plen++;
-	} else {
-		memcpy(path, payload, plen);
-		full_plen = plen;
+	rc = construct_path(payload, domain->domid, &path);
+	if (rc) {
+		goto path_fail;
 	}
+	full_plen = str_byte_size(path);
 
-	/* Extract token value from payload (between 'path' and end '\0') */
-	memcpy(token, payload + plen, len - plen);
-
+	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
 	wentry = key_to_watcher(path, true, token);
 
@@ -806,13 +860,13 @@ static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
 			goto wkey_fail;
 		}
 
-		wentry->token = k_malloc(len - plen);
+		wentry->token = k_malloc(len - path_len);
 		if (!wentry->token) {
 			goto wtoken_fail;
 		}
 
 		memcpy(wentry->key, path, full_plen);
-		memcpy(wentry->token, token, len - plen);
+		memcpy(wentry->token, token, len - path_len);
 		wentry->domain = domain;
 		wentry->is_relative = path_is_relative;
 		sys_dnode_init(&wentry->node);
@@ -847,6 +901,7 @@ static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
 		k_sem_give(&domain->xb_sem);
 	}
 	k_mutex_unlock(&xsel_mutex);
+	k_free(path);
 
 	return;
 
@@ -861,6 +916,7 @@ wtoken_fail:
 wkey_fail:
 	k_free(wentry);
 wentry_fail:
+	k_free(path);
 	LOG_WRN("Failed to create watch for Domain#%d, no memory",
 		domain->domid);
 	send_reply(domain, id, XS_ERROR, "ENOMEM");
@@ -871,6 +927,7 @@ pkey_fail:
 	k_free(pentry);
 pentry_fail:
 	k_mutex_unlock(&xsel_mutex);
+	k_free(path);
 	/*
 	 * We can't notify domain that this file already exists,
 	 * so leave it without first WATCH_EVENT
@@ -882,24 +939,23 @@ pentry_fail:
 static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 			   char *payload, uint32_t len)
 {
-	char path[STRING_LENGTH_MAX] = { 0 };
-	char token[STRING_LENGTH_MAX] = { 0 };
-	size_t plen = 0;
+	char *path;
+	char *token;
 	struct watch_entry *entry;
-	for (; plen < len && payload[plen] != '\0'; ++plen)
-		;
-	plen += 1;
+	size_t path_len = strnlen(payload, len) + 1;
+	int rc;
 
-	if (is_abs_path(payload)) {
-		memcpy(path, payload, plen);
-	} else {
-		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
+	rc = construct_path(payload, domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(domain, id, rc);
+		return;
 	}
 
-	memcpy(token, payload + plen, len - plen);
+	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
 	entry = key_to_watcher(path, true, token);
-
+	k_free(path);
 	if (entry) {
 		if (entry->domain == domain) {
 			remove_watch_entry(entry);
@@ -913,7 +969,7 @@ static void handle_unwatch(struct xen_domain *domain, uint32_t id,
 static void handle_transaction_start(struct xen_domain *domain, uint32_t id,
 				     char *payload, uint32_t len)
 {
-	char buf[8] = { 0 };
+	char buf[INT32_MAX_STR_LEN] = { 0 };
 
 	if (domain->running_transaction)
 	{
@@ -923,7 +979,7 @@ static void handle_transaction_start(struct xen_domain *domain, uint32_t id,
 	}
 
 	domain->running_transaction = ++domain->transaction;
-	snprintf(buf, 8, "%d", domain->running_transaction);
+	snprintf(buf, sizeof(buf), "%d", domain->running_transaction);
 	send_reply(domain, id, XS_TRANSACTION_START, buf);
 }
 
