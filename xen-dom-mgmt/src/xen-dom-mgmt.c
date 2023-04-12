@@ -56,7 +56,7 @@ static int dom_num = 0;
 #endif
 
 #ifndef XEN_VERSION_MINOR
-#define XEN_VERSION_MINOR 16
+#define XEN_VERSION_MINOR 17
 #endif
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
