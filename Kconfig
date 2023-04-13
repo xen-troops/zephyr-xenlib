@@ -26,14 +26,12 @@ config PARTIAL_DEVICE_TREE_SIZE
 
 config XEN_DOMAIN_MANAGEMENT
 	bool "Enable Xen Domain Management"
-	depends on XEN_CONSOLE_SRV
 	help
 	  Enable domain management library. This library allows you
 	  to create, destroy and manage xen domains.
 
 config XEN_CONSOLE_SRV
 	bool "Enable Xen Console server"
-	default y
 	help
 	  Enable xen console server. It should be included if you
 	  are running Zephyr as Dom0, otherwise any DomU that uses
