@@ -32,7 +32,9 @@
 #include <mem-mgmt.h>
 
 #include <xenstore_srv.h>
+#ifdef CONFIG_XEN_CONSOLE_SRV
 #include <xen_console.h>
+#endif
 #include <xss.h>
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
@@ -799,12 +801,13 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		goto domain_free;
 	}
 
-
+#ifdef CONFIG_XEN_CONSOLE_SRV
 	rc = xen_start_domain_console(domain);
 	if (rc) {
 		LOG_ERR("Failed to start domain#%u console (rc=%d)", domid, rc);
 		goto free_domain_stored;
 	}
+#endif
 
 	initialize_xenstore(domid, domcfg, domain);
 
@@ -827,7 +830,9 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	return rc;
 
 stop_domain_console:
+#ifdef CONFIG_XEN_CONSOLE_SRV
 	xen_stop_domain_console(domain);
+#endif
 free_domain_stored:
 	stop_domain_stored(domain);
 domain_free:
@@ -856,11 +861,13 @@ int domain_destroy(uint32_t domid)
 		err = rc;
 	}
 
+#ifdef CONFIG_XEN_CONSOLE_SRV
 	rc = xen_stop_domain_console(domain);
 	if (rc) {
 		LOG_ERR("Failed to stop domain#%u console (rc=%d)", domain->domid, rc);
 		err = rc;
 	}
+#endif
 
 	rc = xen_domctl_destroydomain(domid);
 	if (rc) {
