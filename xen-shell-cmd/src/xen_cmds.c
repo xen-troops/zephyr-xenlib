@@ -9,7 +9,9 @@
 #include <stdlib.h>
 
 #include <xen_dom_mgmt.h>
+#ifdef CONFIG_XEN_CONSOLE_SRV
 #include <xen_console.h>
+#endif
 
 LOG_MODULE_REGISTER(xen_shell);
 
@@ -65,6 +67,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return domain_destroy(domid);
 }
 
+#ifdef CONFIG_XEN_CONSOLE_SRV
 int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
@@ -88,6 +91,7 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 
 	return xen_attach_domain_console(shell, domain);
 }
+#endif
 
 int domu_pause(const struct shell *shell, size_t argc, char **argv)
 {
