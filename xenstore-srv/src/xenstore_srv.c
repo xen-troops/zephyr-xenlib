@@ -939,10 +939,15 @@ static void handle_transaction_stop(struct xen_domain *domain, uint32_t id,
 static void handle_get_domain_path(struct xen_domain *domain, uint32_t id,
 				   char *payload, uint32_t len)
 {
-	char path[32] = { 0 };
-	char domid[8] = { 0 };
-	memcpy(domid, payload, len);
-	snprintf(path, 32, "/local/domain/%s", domid);
+	char path[XENSTORE_MAX_LOCALPATH_LEN] = { 0 };
+
+	if (!domain || !payload) {
+		send_errno(domain, id, EINVAL);
+		return;
+	}
+
+	snprintf(path, XENSTORE_MAX_LOCALPATH_LEN,
+		 "/local/domain/%.*s", len, payload);
 	send_reply(domain, id, XS_GET_DOMAIN_PATH, path);
 }
 
