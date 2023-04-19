@@ -28,6 +28,31 @@ LOG_MODULE_REGISTER(xenstore);
 #define XENSTORE_MAX_LOCALPATH_LEN	21
 
 #define XENSTORE_STACK_SIZE_PER_DOM	4096
+
+struct xs_entry {
+	char *key;
+	char *value;
+	sys_dlist_t child_list;
+
+	sys_dnode_t node;
+};
+
+struct watch_entry {
+	char *key;
+	char *token;
+	struct xen_domain *domain;
+	bool is_relative;
+
+	sys_dnode_t node;
+};
+
+struct pending_watch_event_entry {
+	char *key;
+	struct xen_domain *domain;
+
+	sys_dnode_t node;
+};
+
 static K_THREAD_STACK_ARRAY_DEFINE(xenstore_thrd_stack,
 				   CONFIG_DOM_MAX,
 				   XENSTORE_STACK_SIZE_PER_DOM);
