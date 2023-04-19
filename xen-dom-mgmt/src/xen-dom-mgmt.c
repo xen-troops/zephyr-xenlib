@@ -832,8 +832,8 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 stop_domain_console:
 #ifdef CONFIG_XEN_CONSOLE_SRV
 	xen_stop_domain_console(domain);
-#endif
 free_domain_stored:
+#endif
 	stop_domain_stored(domain);
 domain_free:
 	k_free(domain);
