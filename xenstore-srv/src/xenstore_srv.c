@@ -507,50 +507,6 @@ out:
 	return rc;
 }
 
-int xss_write(const char *path, const char *value)
-{
-	int rc = xss_do_write(path, value);
-
-	if (rc) {
-		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
-	}
-
-	return rc;
-}
-
-int xss_read(const char *path, char *value, size_t len)
-{
-	int rc = -ENOENT;
-	struct xs_entry *entry;
-
-	k_mutex_lock(&xsel_mutex, K_FOREVER);
-
-	entry = key_to_entry(path);
-	if (entry) {
-		strncpy(value, entry->value, len);
-		rc = 0;
-	}
-
-	k_mutex_unlock(&xsel_mutex);
-	return rc;
-}
-
-int xss_read_integer(const char *path, int *value)
-{
-	int rc;
-	char ns[INT32_MAX_STR_LEN] = { 0 };
-
-	rc = xss_read(path, ns, sizeof(ns));
-	if (!rc)
-		*value = atoi(ns);
-	return rc;
-}
-
-int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
-{
-	return 0;
-}
-
 static void notify_watchers(const char *path, uint32_t caller_domid)
 {
 	struct watch_entry *iter;
@@ -596,6 +552,52 @@ pentry_fail:
 	k_mutex_unlock(&wel_mutex);
 	LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
 		iter->domain->domid, path);
+}
+
+int xss_write(const char *path, const char *value)
+{
+	int rc = xss_do_write(path, value);
+
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+	} else {
+		notify_watchers(path, 0);
+	}
+
+	return rc;
+}
+
+int xss_read(const char *path, char *value, size_t len)
+{
+	int rc = -ENOENT;
+	struct xs_entry *entry;
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+
+	entry = key_to_entry(path);
+	if (entry) {
+		strncpy(value, entry->value, len);
+		rc = 0;
+	}
+
+	k_mutex_unlock(&xsel_mutex);
+	return rc;
+}
+
+int xss_read_integer(const char *path, int *value)
+{
+	int rc;
+	char ns[INT32_MAX_STR_LEN] = { 0 };
+
+	rc = xss_read(path, ns, sizeof(ns));
+	if (!rc)
+		*value = atoi(ns);
+	return rc;
+}
+
+int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
+{
+	return 0;
 }
 
 static void _handle_write(struct xen_domain *domain, uint32_t id,
@@ -802,14 +804,22 @@ static int xss_do_rm(const char *key)
 
 int xss_rm(const char *path)
 {
-	return xss_do_rm(path);
+	int ret = xss_do_rm(path);
+
+	if (!ret) {
+		notify_watchers(path, 0);
+	}
+
+	return ret;
 }
 
 static void handle_rm(struct xen_domain *domain, uint32_t id, char *payload,
 	       uint32_t len)
 {
-	xss_do_rm(payload);
-	send_reply_read(domain, id, XS_RM, "");
+	if (xss_do_rm(payload)) {
+		notify_watchers(payload, domain->domid);
+		send_reply_read(domain, id, XS_RM, "");
+	}
 }
 
 static void handle_watch(struct xen_domain *domain, uint32_t id, char *payload,
