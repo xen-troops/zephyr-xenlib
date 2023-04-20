@@ -39,8 +39,6 @@
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
 
-extern struct xen_domain_cfg domd_cfg;
-
 struct modules_address {
   uint64_t ventry;
   uint64_t dtb_addr;
