@@ -41,6 +41,7 @@ config XEN_CONSOLE_SRV
 
 config XEN_SHELL
 	bool "Enable Xen shell commands"
+	select SHELL
 	help
 	  Enable set of Xen shell commands for domain management.
 
