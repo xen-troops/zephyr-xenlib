@@ -351,7 +351,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 			struct modules_address *modules)
 {
 	int rc, err_cache_flush = 0;
-	void *mapped_domd;
+	void *mapped_image;
 	uint64_t dtb_addr;
 	uint64_t load_gfn, base_pfn;
 	uint64_t domain_size = 0;
@@ -411,18 +411,18 @@ static int probe_zimage(int domid, uint64_t base_addr,
 		goto out_dtb;
 	}
 
-	rc = xenmem_map_region(domid, nr_pages, load_gfn, &mapped_domd);
+	rc = xenmem_map_region(domid, nr_pages, load_gfn, &mapped_image);
 	if (rc) {
 		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
 		goto out_dtb;
 	}
 
-	base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
+	base_pfn = XEN_PHYS_PFN((uint64_t)mapped_image);
 	LOG_DBG("Zephyr Domain start addr = %p, binary size = 0x%llx",
-		mapped_domd, domain_size);
+		mapped_image, domain_size);
 
 	/* Copy binary to domain pages and clear cache */
-	rc = domcfg->load_image_bytes(mapped_domd, domain_size,
+	rc = domcfg->load_image_bytes(mapped_image, domain_size,
 				      image_read_offset, domcfg->image_info);
 	if (rc < 0) {
 		LOG_ERR("Error calling load_image_bytes rc: %d", rc);
@@ -441,7 +441,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 		err_cache_flush = rc;
 	}
 
-	rc = xenmem_unmap_region(nr_pages, mapped_domd);
+	rc = xenmem_unmap_region(nr_pages, mapped_image);
 	if (rc) {
 		LOG_ERR("Failed to unmap memory for domid#%d (rc=%d)",
 			domid, rc);
@@ -691,7 +691,6 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	struct xen_domctl_createdomain config;
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domain *domain;
-	char *domdtdevs;
 	struct modules_address modules = {0};
 
 	if (dom_num >= CONFIG_DOM_MAX) {
@@ -699,7 +698,6 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		return -EINVAL;
 	}
 
-	domdtdevs = domcfg->dtdevs;
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
 	config.grant_opts = XEN_DOMCTL_GRANT_version(1);
@@ -774,7 +772,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		goto domain_free;
 	}
 
-	rc = assign_dtdevs(domid, domdtdevs, domcfg->nr_dtdevs);
+	rc = assign_dtdevs(domid, domcfg->dtdevs, domcfg->nr_dtdevs);
 	if (rc) {
 		LOG_ERR("Failed to assign dtdevs for domain#%u (rc=%d)", domid, rc);
 		goto domain_free;
