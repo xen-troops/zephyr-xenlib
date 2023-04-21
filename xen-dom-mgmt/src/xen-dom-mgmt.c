@@ -353,7 +353,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 	int rc, err_cache_flush = 0;
 	void *mapped_image;
 	uint64_t dtb_addr;
-	uint64_t load_gfn, base_pfn;
+	uint64_t load_gfn;
 	uint64_t domain_size = 0;
 	uint64_t nr_pages;
 	char *fdt;
@@ -417,7 +417,6 @@ static int probe_zimage(int domid, uint64_t base_addr,
 		goto out_dtb;
 	}
 
-	base_pfn = XEN_PHYS_PFN((uint64_t)mapped_image);
 	LOG_DBG("Zephyr Domain start addr = %p, binary size = 0x%llx",
 		mapped_image, domain_size);
 
@@ -434,7 +433,8 @@ static int probe_zimage(int domid, uint64_t base_addr,
 	 * This is not critical, so try to restore memory to dom0
 	 * and then return error code.
 	 */
-	rc = xenmem_cacheflush_mapped_pfns(nr_pages, base_pfn);
+	rc = xenmem_cacheflush_mapped_pfns(nr_pages,
+					   xen_virt_to_gfn(mapped_image));
 	if (rc) {
 		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
 			domid, rc);
