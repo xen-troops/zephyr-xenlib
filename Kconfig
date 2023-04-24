@@ -122,3 +122,10 @@ config XSTAT
 	bool "Enable XSTAT support"
 	help
 	  Enable xstat support which allows statistic information about running domains
+
+config XSTAT_SHELL_CMDS
+	depends on XSTAT
+	depends on SHELL
+	bool "Enable XSTAT shell commands"
+	help
+	  Enable set of XSTAT shell commands.
