@@ -24,7 +24,6 @@
 
 LOG_MODULE_REGISTER(xrun);
 
-#define CONTAINER_NAME_SIZE 64
 #define UNIKERNEL_ID_START 12
 #define VCPUS_MAX_COUNT 24
 
@@ -137,7 +136,6 @@ static const struct json_obj_descr vm_spec_descr[] = {
 			      hypervisor, hypervisor_spec_descr),
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec, kernel, kernel_spec_descr),
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec, hwConfig, hwconfig_spec_descr),
-
 };
 
 static const struct json_obj_descr domain_spec_descr[] = {
@@ -284,6 +282,7 @@ static int fill_domcfg(struct xen_domain_cfg *domcfg, struct domain_spec *spec,
 		return -EINVAL;
 	}
 
+	snprintf(domcfg->name, CONTAINER_NAME_SIZE, "%s", container->container_id);
 	domcfg->mem_kb = (spec->vm.hwConfig.memKB) ?
 		spec->vm.hwConfig.memKB : 4096;
 	domcfg->flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);

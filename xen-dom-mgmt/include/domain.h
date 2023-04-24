@@ -17,6 +17,8 @@
 #define XENSTORE_PFN_OFFSET 1
 #define MEMACCESS_PFN_OFFSET 2
 #define VUART_PFN_OFFSET 3
+#define DOM0_NAME "Domain-0"
+#define CONTAINER_NAME_SIZE 64
 
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
@@ -47,6 +49,7 @@ typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
 struct xen_domain_cfg {
+	char name[CONTAINER_NAME_SIZE];
 	uint64_t mem_kb;
 
 	uint32_t flags;
@@ -108,6 +111,7 @@ struct xen_domain_console {
 
 struct xen_domain {
 	uint32_t domid;
+	char name[CONTAINER_NAME_SIZE];
 	struct xenstore xenstore;
 	int num_vcpus;
 	int address_size;
