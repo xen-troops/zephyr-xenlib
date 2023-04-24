@@ -615,8 +615,12 @@ static void initialize_xenstore(uint32_t domid,
 				const struct xen_domain_cfg *domcfg,
 				const struct xen_domain *domain)
 {
-	char lbuffer[80] = { 0 };
-	char rbuffer[80] = { 0 };
+#if defined INIT_XENSTORE_BUFF_SIZE
+#warning "INIT_XENSTORE_BUFF_SIZE already defined somewhere"
+#endif
+#define INIT_XENSTORE_BUFF_SIZE 80
+	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char uuid[40];
 	static const char basepref[] = "/local/domain";
 	static const char * const dirs[] = { "data",
@@ -660,9 +664,13 @@ static void initialize_xenstore(uint32_t domid,
 	xss_write(lbuffer, uuid);
 
 	sprintf(lbuffer, "/vm/%s/name", uuid);
-	sprintf(rbuffer, "zephyr-%d", domid);
+	if (domain->name[0]) {
+		snprintf(rbuffer, INIT_XENSTORE_BUFF_SIZE, "%s", domain->name);
+	} else {
+		sprintf(rbuffer, "zephyr-%d", domid);
+	}
 	xss_write(lbuffer, rbuffer);
-	sprintf(lbuffer, "/local/domain/%d/name", domid);
+	sprintf(lbuffer, "%s/%d/name", basepref, domid);
 	xss_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/vm/%s/start_time", uuid);
 	xss_write(lbuffer, "0");
@@ -682,6 +690,7 @@ static void initialize_xenstore(uint32_t domid,
 	xss_write(lbuffer, "qemu_xen_traditional");
 	sprintf(lbuffer, "/libxl/%d/type", domid);
 	xss_write(lbuffer, "pvh");
+#undef INIT_XENSTORE_BUFF_SIZE
 }
 
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
@@ -714,6 +723,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	memset(domain, 0, sizeof(*domain));
 	domain->domid = domid;
 
+	snprintf(domain->name, CONTAINER_NAME_SIZE, "%s", domcfg->name);
 	rc = xen_domctl_max_vcpus(domid, domcfg->max_vcpus);
 	if (rc) {
 		LOG_ERR("Failed to set max vcpus for domain#%u (rc=%d)", domid, rc);
