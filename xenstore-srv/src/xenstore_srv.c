@@ -795,18 +795,12 @@ static void remove_recurse(sys_dlist_t *chlds)
 	}
 }
 
-static int xss_do_rm(const char *key)
+/*
+ * If entry is a part of root_xenstore, the function
+ * must be called with xsel_mutex lock.
+ */
+static void free_node(struct xs_entry *entry)
 {
-	sys_dlist_t child;
-	struct xs_entry *entry;
-
-	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(key);
-	if (!entry) {
-		k_mutex_unlock(&xsel_mutex);
-		return -EINVAL;
-	}
-
 	if (entry->key) {
 		k_free(entry->key);
 		entry->key = NULL;
@@ -818,12 +812,24 @@ static int xss_do_rm(const char *key)
 	}
 
 	sys_dlist_remove(&entry->node);
-	child = entry->child_list;
-
+	remove_recurse(&entry->child_list);
 	k_free(entry);
+}
+
+static int xss_do_rm(const char *key)
+{
+	struct xs_entry *entry;
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(key);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		return -EINVAL;
+	}
+
+	free_node(entry);
 	k_mutex_unlock(&xsel_mutex);
 
-	remove_recurse(&child);
 	return 0;
 }
 
