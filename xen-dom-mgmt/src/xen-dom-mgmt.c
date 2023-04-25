@@ -6,8 +6,6 @@
 
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
-#include <zephyr/xen/dom0/zimage.h>
-#include <zephyr/xen/dom0/uimage.h>
 #include <zephyr/xen/generic.h>
 #include <zephyr/xen/hvm.h>
 #include <zephyr/xen/memory.h>
@@ -30,6 +28,8 @@
 #include <domain.h>
 #include <xen-dom-fdt.h>
 #include <mem-mgmt.h>
+#include <uimage.h>
+#include <zimage.h>
 
 #include <xenstore_srv.h>
 #ifdef CONFIG_XEN_CONSOLE_SRV
