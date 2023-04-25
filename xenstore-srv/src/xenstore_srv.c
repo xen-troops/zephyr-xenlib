@@ -75,6 +75,8 @@ struct message_handle {
 	void (*h)(struct xen_domain *domain, uint32_t id, char *payload, uint32_t sz);
 };
 
+static void free_node(struct xs_entry *entry);
+
 /* Allocate one stack for external reader thread */
 static int get_stack_idx(void)
 {
@@ -457,10 +459,40 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 	return 0;
 }
 
+static void remove_recurse(sys_dlist_t *children)
+{
+	struct xs_entry *entry, *next;
+
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, entry, next, node) {
+		free_node(entry);
+	}
+}
+
+/*
+ * If entry is a part of root_xenstore, the function
+ * must be called with xsel_mutex lock.
+ */
+static void free_node(struct xs_entry *entry)
+{
+	if (entry->key) {
+		k_free(entry->key);
+		entry->key = NULL;
+	}
+
+	if (entry->value) {
+		k_free(entry->value);
+		entry->value = NULL;
+	}
+
+	sys_dlist_remove(&entry->node);
+	remove_recurse(&entry->child_list);
+	k_free(entry);
+}
+
 static int xss_do_write(const char *const_path, const char *data)
 {
 	int rc = 0;
-	struct xs_entry *iter = NULL;
+	struct xs_entry *iter = NULL, *insert_entry = NULL;
 	char *path;
 	char *tok, *tok_state, *new_value;
 	size_t data_len = str_byte_size(data);
@@ -489,7 +521,7 @@ static int xss_do_write(const char *const_path, const char *data)
 			if (!iter) {
 				LOG_ERR("Failed to allocate memory for xs entry");
 				rc = -ENOMEM;
-				goto out;
+				goto free_allocated;
 			}
 
 			namelen = strlen(tok);
@@ -497,7 +529,7 @@ static int xss_do_write(const char *const_path, const char *data)
 			if (!iter->key) {
 				k_free(iter);
 				rc = -ENOMEM;
-				goto out;
+				goto free_allocated;
 			}
 			memcpy(iter->key, tok, namelen);
 			iter->key[namelen] = 0;
@@ -506,6 +538,9 @@ static int xss_do_write(const char *const_path, const char *data)
 			sys_dlist_init(&iter->child_list);
 			sys_dnode_init(&iter->node);
 			sys_dlist_append(inspected_list, &iter->node);
+			if (!insert_entry) {
+				insert_entry = iter;
+			}
 		}
 
 		inspected_list = &iter->child_list;
@@ -516,7 +551,7 @@ static int xss_do_write(const char *const_path, const char *data)
 		if (!new_value) {
 			LOG_ERR("Failed to allocate memory for xs entry value");
 			rc = -ENOMEM;
-			goto out;
+			goto free_allocated;
 		}
 
 		if (iter->value) {
@@ -527,7 +562,16 @@ static int xss_do_write(const char *const_path, const char *data)
 		memcpy(iter->value, data, data_len);
 	}
 
-out:
+	k_mutex_unlock(&xsel_mutex);
+	k_free(path);
+
+	return rc;
+
+free_allocated:
+	if (insert_entry) {
+		free_node(insert_entry);
+	}
+
 	k_mutex_unlock(&xsel_mutex);
 	k_free(path);
 
@@ -774,48 +818,6 @@ static void handle_read(struct xen_domain *domain, uint32_t id, char *payload,
 	k_mutex_unlock(&xsel_mutex);
 
 	send_reply(domain, id, XS_ERROR, "ENOENT");
-}
-
-static void remove_recurse(sys_dlist_t *chlds)
-{
-	struct xs_entry *entry, *next;
-	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (chlds, entry, next, node) {
-		if (entry->key) {
-			k_free(entry->key);
-			entry->key = NULL;
-		}
-
-		if (entry->value) {
-			k_free(entry->value);
-			entry->value = NULL;
-		}
-
-		remove_recurse(&entry->child_list);
-
-		sys_dlist_remove(&entry->node);
-		k_free(entry);
-	}
-}
-
-/*
- * If entry is a part of root_xenstore, the function
- * must be called with xsel_mutex lock.
- */
-static void free_node(struct xs_entry *entry)
-{
-	if (entry->key) {
-		k_free(entry->key);
-		entry->key = NULL;
-	}
-
-	if (entry->value) {
-		k_free(entry->value);
-		entry->value = NULL;
-	}
-
-	sys_dlist_remove(&entry->node);
-	remove_recurse(&entry->child_list);
-	k_free(entry);
 }
 
 static int xss_do_rm(const char *key)
