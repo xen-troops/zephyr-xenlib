@@ -15,7 +15,6 @@
 #include <zephyr/xen/public/xen.h>
 
 #include <zephyr/xen/public/io/console.h>
-#include <zephyr/xen/public/io/xs_wire.h>
 #include <zephyr/xen/events.h>
 #include <zephyr/logging/log.h>
 
