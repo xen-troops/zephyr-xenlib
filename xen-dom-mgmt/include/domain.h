@@ -12,6 +12,12 @@
 #include <zephyr/xen/generic.h>
 #include <xenstore_srv.h>
 
+#define NR_MAGIC_PAGES 4
+#define CONSOLE_PFN_OFFSET 0
+#define XENSTORE_PFN_OFFSET 1
+#define MEMACCESS_PFN_OFFSET 2
+#define VUART_PFN_OFFSET 3
+
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
 	uint64_t first_gfn;
