@@ -462,7 +462,7 @@ static int xss_do_write(const char *const_path, const char *data)
 	int rc = 0;
 	struct xs_entry *iter = NULL;
 	char *path;
-	char *tok, *tok_state;
+	char *tok, *tok_state, *new_value;
 	size_t data_len = str_byte_size(data);
 	size_t namelen;
 	sys_dlist_t *inspected_list;
@@ -512,16 +512,18 @@ static int xss_do_write(const char *const_path, const char *data)
 	}
 
 	if (iter && data_len > 0) {
-		if (iter->value != NULL) {
-			k_free(iter->value);
-		}
-
-		iter->value = k_malloc(data_len);
-		if (!iter->value) {
+		new_value = k_malloc(data_len);
+		if (!new_value) {
 			LOG_ERR("Failed to allocate memory for xs entry value");
 			rc = -ENOMEM;
 			goto out;
 		}
+
+		if (iter->value) {
+			k_free(iter->value);
+		}
+
+		iter->value = new_value;
 		memcpy(iter->value, data, data_len);
 	}
 
