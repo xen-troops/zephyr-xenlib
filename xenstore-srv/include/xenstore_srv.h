@@ -7,7 +7,7 @@
 #ifndef XENLIB_XENSTORE_SRV_H
 #define XENLIB_XENSTORE_SRV_H
 
-#include <zephyr/xen/public/io/xs_wire.h>
+#include "xen/public/io/xs_wire.h"
 
 struct buffered_data {
 	/* Used to link buffers into singly-linked list */
