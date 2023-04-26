@@ -10,7 +10,8 @@
 #include <zephyr/xen/public/event_channel.h>
 #include <zephyr/xen/public/grant_table.h>
 #include <zephyr/xen/public/xen.h>
-#include <zephyr/xen/public/io/libxenvchan.h>
+
+#include "xen/public/io/libxenvchan.h"
 
 #ifdef __cplusplus
 extern "C" {
