@@ -671,14 +671,45 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	return 0;
 }
 
+static int construct_data(char *payload, int len, int path_len, char **data)
+{
+	int data_size = len - path_len;
+
+	if (path_len == len) {
+		return 0;
+	}
+
+	/* Add space for terminating NULL if not present */
+	if (payload[len - 1]) {
+		data_size++;
+	}
+
+	*data = k_malloc(data_size);
+	if (!*data) {
+		return -ENOMEM;
+	}
+
+	memcpy(*data, payload + path_len, data_size - 1);
+	(*data)[data_size - 1] = 0;
+
+	return data_size;
+}
+
 static void _handle_write(struct xen_domain *domain, uint32_t id,
 			  uint32_t msg_type, char *payload,
 			  uint32_t len)
 {
 	int rc = 0;
 	char *path;
-	char *data;
+	char *data = NULL;
 	size_t path_len = str_byte_size(payload);
+
+	if (len < path_len) {
+		LOG_ERR("Write path length (%zu) is bigger than given payload size (%u)",
+			path_len, len);
+		send_errno(domain, id, EINVAL);
+		return;
+	}
 
 	rc = construct_path(payload, domain->domid, &path);
 	if (rc) {
@@ -687,26 +718,25 @@ static void _handle_write(struct xen_domain *domain, uint32_t id,
 		return;
 	}
 
-	data = payload + path_len;
-	if (len < path_len) {
-		LOG_ERR("Data size mismatch");
-		send_errno(domain, id, EINVAL);
-		k_free(path);
-		return;
+	rc = construct_data(payload, len, path_len, &data);
+	if (rc < 0) {
+		send_errno(domain, id, -rc);
+		goto free_path;
 	}
 
-	data[len - path_len] = 0;
 	rc = xss_do_write(path, data);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 		send_errno(domain, id, rc);
-		k_free(path);
-		return;
+		goto free_data;
 	}
 
 	send_reply(domain, id, msg_type, "OK");
-
 	notify_watchers(path, domain->domid);
+
+free_data:
+	k_free(data);
+free_path:
 	k_free(path);
 }
 
