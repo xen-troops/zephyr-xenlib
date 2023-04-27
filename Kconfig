@@ -83,6 +83,27 @@ config XRUN_MAX_PATH_SIZE
 	  The default value is set to LFS_NAME_MAX which is default
 	  for littlefs configuration.
 
+config XRUN_DTDEVS_MAX
+	int "Maximum numbers of the provided dtdevs"
+	default 20
+	help
+	  Sets the maximum number of the dtdevs configuration
+	  provided in the OCI spec.
+
+config XRUN_IOMEMS_MAX
+	int "Maximum numbers of the provided iomems"
+	default 20
+	help
+	  Sets the maximum number of the iomems configuration
+	  provided in the OCI spec.
+
+config XRUN_IRQS_MAX
+	int "Maximum numbers of the provided irqs"
+	default 20
+	help
+	  Sets the maximum number of the irqs configuration
+	  provided in the OCI spec.
+
 config PFN_CHUNK_SIZE
 	int "Chunk size for memory mapping operations"
 	default 128
