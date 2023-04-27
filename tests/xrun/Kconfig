@@ -1,0 +1,29 @@
+# Copyright (C) 2023 Renesas Electronics Corporation.
+# Copyright (C) 2023 EPAM Systems, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "Xrun test application"
+
+config XRUN_JSON_SIZE_MAX
+	int "Maximum size of the json cni spec"
+	default 8192
+	help
+	  Sets the maximum size of the cni spec json that could
+	  be passed to xrun call.
+
+config XRUN_MAX_PATH_SIZE
+	int "Maximum length of file path to read from storage"
+	default 255
+	help
+	  Sets the maximum path size that xrun can read from storage.
+	  The default value is set to LFS_NAME_MAX which is default
+	  for littlefs configuration.
+
+config PARTIAL_DEVICE_TREE_SIZE
+	int "Domain device tree size"
+	default 8192
+	help
+	  Maximum size of the domain device tree
+
+source "Kconfig"

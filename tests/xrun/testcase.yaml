@@ -1,0 +1,7 @@
+tests:
+  zephyr-xenlib.xrun:
+    build_only: false
+    tags: xrun
+    integration_platforms:
+      - native_posix_64
+    platform_allow: native_posix_64
