@@ -10,6 +10,7 @@
 
 #include <zephyr/data/json.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/slist.h>
 
@@ -25,10 +26,12 @@ LOG_MODULE_REGISTER(xrun);
 
 #define CONTAINER_NAME_SIZE 64
 #define UNIKERNEL_ID_START 12
+#define VCPUS_MAX_COUNT 24
 
 #define CONFIG_JSON_NAME "config.json"
 
 K_MUTEX_DEFINE(container_lock);
+
 static sys_slist_t container_list = SYS_SLIST_STATIC_INIT(&container_list);
 static uint32_t next_domid = UNIKERNEL_ID_START;
 
@@ -46,20 +49,39 @@ struct kernel_spec {
 	size_t params_len;
 };
 
+struct iomem_spec {
+	const uint64_t firstGFN;
+	const uint64_t firstMFN;
+	const uint64_t nrMFNs;
+};
+
 struct hwconfig_spec {
-	const char *devicetree;
+	const char *deviceTree;
+	const uint32_t vcpus;
+	const uint64_t memKB;
+	const char *dtdevs[CONFIG_XRUN_DTDEVS_MAX];
+	const struct iomem_spec iomems[CONFIG_XRUN_IOMEMS_MAX];
+	const uint32_t irqs[CONFIG_XRUN_IRQS_MAX];
+	size_t iomems_len;
+	size_t dtdevs_len;
+	size_t irqs_len;
 };
 
 struct vm_spec {
 	struct hypervisor_spec hypervisor;
 	struct kernel_spec kernel;
-	struct hwconfig_spec hwconfig;
+	struct hwconfig_spec hwConfig;
 };
 
 struct domain_spec {
 	const char *ociVersion;
 	struct vm_spec vm;
 };
+
+static K_MUTEX_DEFINE(container_run_lock);
+static char *gdtdevs[CONFIG_XRUN_DTDEVS_MAX];
+static struct xen_domain_iomem giomems[CONFIG_XRUN_IOMEMS_MAX];
+static uint32_t girqs[CONFIG_XRUN_IRQS_MAX];
 
 struct container {
 	sys_snode_t node;
@@ -68,14 +90,11 @@ struct container {
 	const char *bundle;
 
 	uint8_t devicetree[CONFIG_PARTIAL_DEVICE_TREE_SIZE];
-	char *cmdline;
 
 	uint64_t domid;
 	char kernel_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	char dt_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	bool has_dt_image;
-	/* struct domain_spec spec; */
-	struct xen_domain_cfg domcfg;
 	enum container_status status;
 };
 
@@ -93,15 +112,31 @@ static const struct json_obj_descr kernel_spec_descr[] = {
 			     JSON_TOK_STRING),
 };
 
+static const struct json_obj_descr iomem_spec_descr[] = {
+	JSON_OBJ_DESCR_PRIM(struct iomem_spec, firstGFN, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct iomem_spec, firstMFN, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct iomem_spec, nrMFNs, JSON_TOK_NUMBER),
+};
+
 static const struct json_obj_descr hwconfig_spec_descr[] = {
-	JSON_OBJ_DESCR_PRIM(struct hwconfig_spec, devicetree, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct hwconfig_spec, deviceTree, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_PRIM(struct hwconfig_spec, vcpus, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_PRIM(struct hwconfig_spec, memKB, JSON_TOK_NUMBER),
+	JSON_OBJ_DESCR_ARRAY(struct hwconfig_spec, dtdevs, CONFIG_XRUN_DTDEVS_MAX,
+			     dtdevs_len, JSON_TOK_STRING),
+	JSON_OBJ_DESCR_OBJ_ARRAY(struct hwconfig_spec, iomems,
+				 CONFIG_XRUN_IOMEMS_MAX, iomems_len,
+				 iomem_spec_descr,
+				 ARRAY_SIZE(iomem_spec_descr)),
+	JSON_OBJ_DESCR_ARRAY(struct hwconfig_spec, irqs, CONFIG_XRUN_IRQS_MAX,
+			     irqs_len, JSON_TOK_NUMBER),
 };
 
 static const struct json_obj_descr vm_spec_descr[] = {
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec,
 			      hypervisor, hypervisor_spec_descr),
 	JSON_OBJ_DESCR_OBJECT(struct vm_spec, kernel, kernel_spec_descr),
-	JSON_OBJ_DESCR_OBJECT(struct vm_spec, hwconfig, hwconfig_spec_descr),
+	JSON_OBJ_DESCR_OBJECT(struct vm_spec, hwConfig, hwconfig_spec_descr),
 
 };
 
@@ -180,7 +215,6 @@ static struct container *register_container_id(const char *container_id)
 
 	strncpy(container->container_id, container_id, CONTAINER_NAME_SIZE);
 	container->domid = next_domid++;
-	container->cmdline = NULL;
 
 	k_mutex_lock(&container_lock, K_FOREVER);
 	sys_slist_append(&container_list, &container->node);
@@ -197,7 +231,6 @@ static int unregister_container_id(const char *container_id)
 		return -ENOENT;
 	}
 
-	k_free(container->cmdline);
 	k_mutex_lock(&container_lock, K_FOREVER);
 	sys_slist_find_and_remove(&container_list, &container->node);
 	k_mutex_unlock(&container_lock);
@@ -242,31 +275,81 @@ static ssize_t get_image_size(void *image_info, uint64_t *size)
 	return (size == 0) ? -EINVAL : 0;
 }
 
-static int fill_domcfg(struct container *container)
+static int fill_domcfg(struct xen_domain_cfg *domcfg, struct domain_spec *spec,
+		       struct container *container)
 {
-	struct xen_domain_cfg *domcfg;
+	int i;
 
-	if (!container) {
+	if (!domcfg || !spec) {
 		return -EINVAL;
 	}
-	domcfg = &container->domcfg;
 
-	/*
-	 * TODO: Memory and cpu configuration should be read
-	 * from json spec. Hardcoding those parameters because
-	 * there is no clear view about JSON format
-	 */
-	domcfg->mem_kb = 4096;
+	domcfg->mem_kb = (spec->vm.hwConfig.memKB) ?
+		spec->vm.hwConfig.memKB : 4096;
 	domcfg->flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap);
 	domcfg->max_evtchns = 10;
-	domcfg->max_vcpus = 1;
+	if (spec->vm.hwConfig.vcpus < VCPUS_MAX_COUNT) {
+		domcfg->max_vcpus = (spec->vm.hwConfig.vcpus) ?
+			spec->vm.hwConfig.vcpus : 1;
+	} else {
+		domcfg->max_vcpus = 1;
+	}
+
 	domcfg->gnt_frames = 32;
 	domcfg->max_maptrack_frames = 1;
 
-	domcfg->nr_iomems = 0;
+	domcfg->nr_iomems = spec->vm.hwConfig.iomems_len;
 
-	/* irqs = domd_irqs, */
-	domcfg->nr_irqs = 0;
+	/*
+	 * NOTE: We expect iomems, dtdevs and irqs arrays to be allocated
+	 * by caller. We don't need those buffers after domain is created so
+	 * I expect them to be allocated on the upper layer.
+	 */
+
+	if (domcfg->nr_iomems) {
+		if (domcfg->nr_iomems > CONFIG_XRUN_IRQS_MAX) {
+			return -EINVAL;
+		}
+
+		for (i = 0; i < domcfg->nr_iomems; i++) {
+			domcfg->iomems[i].first_gfn =
+				spec->vm.hwConfig.iomems[i].firstGFN;
+			domcfg->iomems[i].first_mfn =
+				spec->vm.hwConfig.iomems[i].firstMFN;
+			domcfg->iomems[i].nr_mfns =
+				spec->vm.hwConfig.iomems[i].nrMFNs;
+		}
+	}
+
+	domcfg->nr_irqs = spec->vm.hwConfig.irqs_len;
+
+	if (domcfg->nr_irqs) {
+		if (domcfg->nr_irqs > CONFIG_XRUN_IRQS_MAX) {
+			return -EINVAL;
+		}
+
+		for (i = 0; i < domcfg->nr_irqs; i++) {
+			domcfg->irqs[i] =
+				spec->vm.hwConfig.irqs[i];
+		}
+	}
+
+	domcfg->nr_dtdevs = spec->vm.hwConfig.dtdevs_len;
+
+	if (domcfg->nr_dtdevs) {
+		if (domcfg->nr_dtdevs > CONFIG_XRUN_DTDEVS_MAX) {
+			return -EINVAL;
+		}
+
+		/*
+		 * dtdevs strings should be used to create domain before spec
+		 * is destroyed.
+		 */
+		for (i = 0; i < domcfg->nr_dtdevs; i++) {
+			domcfg->dtdevs[i] = (char *)spec->vm.hwConfig.dtdevs[i];
+		}
+	}
+
 	/*
 	 * Current implementation doesn't support GIC_NATIVE
 	 * parameter. We use the same gic version as is on the system.
@@ -278,12 +361,8 @@ static int fill_domcfg(struct container *container)
 #endif
 	domcfg->tee_type = XEN_DOMCTL_CONFIG_TEE_NONE;
 
-	/* domcfg->dtdevs = domd_dtdevs, */
-	domcfg->nr_dtdevs = 0;
-
+	/* OCI spec do not support dt_passthrough */
 	domcfg->nr_dt_passthrough = 0;
-
-	domcfg->cmdline = container->cmdline;
 
 	domcfg->get_image_size = get_image_size;
 	domcfg->load_image_bytes = load_image_bytes;
@@ -397,8 +476,9 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	char *config;
 	char *fpath;
 	ssize_t fpath_len;
-	struct domain_spec spec;
+	struct domain_spec spec = {0};
 	struct container *container;
+	struct xen_domain_cfg domcfg = {0};
 
 	/* Don't allow empty (first char is \0) or null container_id */
 	if (!container_id || !*container_id) {
@@ -412,7 +492,8 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 
 	container = register_container_id(container_id);
 	if (!container) {
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_unlock;
 	}
 
 	config = k_malloc(CONFIG_XRUN_JSON_SIZE_MAX);
@@ -465,19 +546,20 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 		goto err_config;
 	}
 
-	container->has_dt_image = strlen(spec.vm.hwconfig.devicetree) > 0;
+	container->has_dt_image = spec.vm.hwConfig.deviceTree &&
+		strlen(spec.vm.hwConfig.deviceTree) > 0;
 
 	if (container->has_dt_image) {
 		ret = snprintf(container->dt_image,
 			       CONFIG_XRUN_MAX_PATH_SIZE,
-			       "%s", spec.vm.hwconfig.devicetree);
-		if (ret < strlen(spec.vm.hwconfig.devicetree)) {
+			       "%s", spec.vm.hwConfig.deviceTree);
+		if (ret < strlen(spec.vm.hwConfig.deviceTree)) {
 			LOG_ERR("Unable to get device-tree path, rc = %d", ret);
 			goto err_config;
 		}
 	}
 
-	ret = generate_cmdline(&spec, &container->cmdline);
+	ret = generate_cmdline(&spec, &domcfg.cmdline);
 	if (ret < 0) {
 		goto err_config;
 	}
@@ -486,24 +568,47 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 
 	container->bundle = bundle;
 	container->status = RUNNING;
-	LOG_DBG("domid = %lld", container->domid);
 
-	ret = fill_domcfg(container);
+	if (spec.vm.hwConfig.iomems_len) {
+		domcfg.iomems = giomems;
+	}
+
+	if (spec.vm.hwConfig.dtdevs_len) {
+		domcfg.dtdevs = gdtdevs;
+	}
+
+	if (spec.vm.hwConfig.irqs_len) {
+		domcfg.irqs = girqs;
+	}
+
+	LOG_DBG("domid = %lld", container->domid);
+	k_mutex_lock(&container_run_lock, K_FOREVER);
+
+	ret = fill_domcfg(&domcfg, &spec, container);
 	if (ret) {
+		k_mutex_unlock(&container_run_lock);
 		goto err;
 	}
 
-	ret = domain_create(&container->domcfg, container->domid);
+	ret = domain_create(&domcfg, container->domid);
 	if (ret) {
+		k_mutex_unlock(&container_run_lock);
 		goto err;
 	}
 
 	ret = domain_unpause(container->domid);
+
+	k_free(domcfg.cmdline);
+	k_mutex_unlock(&container_run_lock);
+
 	return ret;
  err_config:
 	k_free(config);
  err:
+	k_free(domcfg.cmdline);
 	unregister_container_id(container_id);
+ err_unlock:
+	k_mutex_unlock(&container_run_lock);
 	return ret;
 }
 
