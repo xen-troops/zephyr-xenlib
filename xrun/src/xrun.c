@@ -12,7 +12,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/slist.h>
+
+#if !defined(CONFIG_BOARD_NATIVE_POSIX)
 #include <zephyr/xen/public/domctl.h>
+#endif
 
 #include <storage.h>
 #include <xen_dom_mgmt.h>
