@@ -627,8 +627,14 @@ pentry_fail:
 
 int xss_write(const char *path, const char *value)
 {
-	int rc = xss_do_write(path, value);
+	int rc;
 
+	if (!path || !value) {
+		LOG_ERR("Invalid arguments: path or value is NULL");
+		return -EINVAL;
+	}
+
+	rc = xss_do_write(path, value);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
