@@ -1205,7 +1205,8 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 			sz += delta;
 		} while (sz < header->len);
 
-		if (message_handle_list[header->type].h == NULL) {
+		if (header->type >= XS_TYPE_COUNT ||
+		    message_handle_list[header->type].h == NULL) {
 			LOG_ERR("Unsupported message type: %u", header->type);
 			send_errno(domain, header->req_id, ENOSYS);
 		} else {
