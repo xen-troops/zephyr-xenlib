@@ -30,7 +30,7 @@ LOG_MODULE_REGISTER(xrun);
 
 #define CONFIG_JSON_NAME "config.json"
 
-K_MUTEX_DEFINE(container_lock);
+static K_MUTEX_DEFINE(container_lock);
 
 static sys_slist_t container_list = SYS_SLIST_STATIC_INIT(&container_list);
 static uint32_t next_domid = UNIKERNEL_ID_START;
