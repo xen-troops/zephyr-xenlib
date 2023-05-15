@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/init.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/generic.h>
@@ -35,8 +36,14 @@
 #include <xen_console.h>
 #endif
 #include <xss.h>
+#ifdef CONFIG_XSTAT
+#include <xstat.h>
+#endif
 
 LOG_MODULE_REGISTER(xen_dom_mgmt);
+
+#define DOM0_XENSTORE_PRIORITY 45
+BUILD_ASSERT(DOM0_XENSTORE_PRIORITY > CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 struct modules_address {
   uint64_t ventry;
@@ -693,6 +700,59 @@ static void initialize_xenstore(uint32_t domid,
 #undef INIT_XENSTORE_BUFF_SIZE
 }
 
+static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
+{
+	int ret = 0;
+	struct xen_domain_cfg *dom0cfg = NULL;
+	struct xen_domain *dom0 = NULL;
+#ifdef CONFIG_XSTAT
+	struct xenstat_domain *dom0stat = NULL;
+
+	dom0stat = k_malloc(sizeof(struct xenstat_domain));
+	if (!dom0stat) {
+		ret = -ENOMEM;
+		LOG_ERR("Can't allocate memory (line=%d)", __LINE__);
+		goto out;
+	}
+	ret = xstat_getdominfo(dom0stat, 0, 1);
+	if (ret < 0) {
+		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
+		goto out;
+	}
+	if (ret == 0) {
+		/* Theoretically impossible */
+		ret = -EINVAL;
+		goto out;
+	}
+#endif
+	dom0cfg = k_malloc(sizeof(struct xen_domain_cfg));
+	dom0 = k_malloc(sizeof(struct xen_domain));
+	if (!dom0cfg || !dom0) {
+		ret = -ENOMEM;
+		LOG_ERR("Can't allocate memory (line=%d)", __LINE__);
+		goto out;
+	}
+	snprintf(dom0cfg->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
+	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
+#ifdef CONFIG_XSTAT
+	dom0cfg->max_vcpus = dom0stat->num_vcpus;
+	dom0cfg->mem_kb = dom0stat->cur_mem / 1024;
+	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
+#else
+	dom0cfg->max_vcpus = 0;
+	dom0cfg->mem_kb = 0;
+	dom0->max_mem_kb = 0;
+#endif
+	initialize_xenstore(0, dom0cfg, dom0);
+out:
+#ifdef CONFIG_XSTAT
+	k_free(dom0stat);
+#endif
+	k_free(dom0cfg);
+	k_free(dom0);
+	return ret;
+}
+
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 {
 	int rc = 0;
@@ -920,3 +980,5 @@ int domain_unpause(uint32_t domid)
 
 	return xen_domctl_unpausedomain(domid);
 }
+
+SYS_INIT(initialize_dom0_xenstore, APPLICATION, DOM0_XENSTORE_PRIORITY);
