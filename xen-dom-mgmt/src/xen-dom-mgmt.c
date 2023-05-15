@@ -615,11 +615,11 @@ static void initialize_xenstore(uint32_t domid,
 				const struct xen_domain_cfg *domcfg,
 				const struct xen_domain *domain)
 {
-	char lbuffer[256] = { 0 };
-	char rbuffer[256] = { 0 };
+	char lbuffer[80] = { 0 };
+	char rbuffer[80] = { 0 };
 	char uuid[40];
-	char basepref[] = "/local/domain";
-	char *dirs[] = { "data",
+	static const char basepref[] = "/local/domain";
+	static const char * const dirs[] = { "data",
 			 "drivers",
 			 "feature",
 			 "attr",
