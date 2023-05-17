@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <zephyr/xen/events.h>
 #include <zephyr/xen/generic.h>
+#include <xenstore_srv.h>
 
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
@@ -101,26 +102,14 @@ struct xen_domain_console {
 
 struct xen_domain {
 	uint32_t domid;
-	struct xenstore_domain_interface *domint;
+	struct xenstore xenstore;
 	int num_vcpus;
 	int address_size;
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
-	size_t xs_stack_slot;
 
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
-	struct k_sem xb_sem;
-	struct k_thread xenstore_thrd;
-	atomic_t xenstore_thrd_stop;
-	k_tid_t xenstore_tid;
-	evtchn_port_t xenstore_evtchn;
-	evtchn_port_t local_xenstore_evtchn;
-
-	int transaction;
-	int running_transaction;
-	int stop_transaction_id;
-	bool pending_stop_transaction;
 };
 
 struct xen_domain *domid_to_domain(uint32_t domid);

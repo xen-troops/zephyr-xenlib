@@ -106,10 +106,10 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 		       rc);
 		return rc;
 	}
-	domain->xenstore_evtchn = rc;
+	domain->xenstore.remote_evtchn = rc;
 
-	LOG_DBG("Generated remote_domid=%d, xenstore_evtchn = %d", domain->domid,
-	       domain->xenstore_evtchn);
+	LOG_DBG("Generated remote_domid=%d, remote_evtchn = %d", domain->domid,
+		domain->xenstore.remote_evtchn);
 
 	rc = alloc_unbound_event_channel_dom0(domain->domid, 0);
 	if (rc < 0) {
