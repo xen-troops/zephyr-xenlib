@@ -28,6 +28,12 @@ LOG_MODULE_REGISTER(xenstore);
 #define XENSTORE_MAX_LOCALPATH_LEN	21
 
 #define XENSTORE_STACK_SIZE_PER_DOM	4096
+/*
+ * Max number of possible allocated output buffers.
+ * This limit is needed to prevent Denial of Service attacks,
+ * while domain is not reading responses.
+ */
+#define XENSTORE_MAX_OUT_BUF_NUM 10
 
 struct xs_entry {
 	char *key;
@@ -76,6 +82,7 @@ struct message_handle {
 };
 
 static void free_node(struct xs_entry *entry);
+static void send_errno(struct xenstore *xenstore, uint32_t id, int err);
 
 /* Allocate one stack for external reader thread */
 static int get_stack_idx(void)
@@ -258,35 +265,14 @@ static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
 static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
 				size_t *len)
 {
-	size_t delta = XENSTORE_RING_SIZE - cons + prod;
-	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(prod);
+	size_t free_space = XENSTORE_RING_SIZE - (prod - cons);
 
-	if (delta < *len) {
-		*len = delta;
+	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(prod);
+	if (free_space < *len) {
+		*len = free_space;
 	}
 
 	return MASK_XENSTORE_IDX(prod);
-}
-
-static void write_xb(struct xenstore_domain_interface *intf, uint8_t *data,
-		     uint32_t len)
-{
-	size_t blen = 0;
-	size_t offset = 0;
-
-	do {
-		size_t tail = get_output_offset(intf->rsp_cons, intf->rsp_prod, &blen);
-
-		if (blen == 0) {
-			continue;
-		}
-
-		size_t effect = blen > len ? len : blen;
-		memcpy(intf->rsp + tail, data + offset, effect);
-		offset += effect;
-		len -= effect;
-		intf->rsp_prod += effect;
-	} while (len > 0);
 }
 
 static size_t read_xb(struct xenstore *xenstore, uint8_t *data, uint32_t len)
@@ -314,22 +300,137 @@ static size_t read_xb(struct xenstore *xenstore, uint8_t *data, uint32_t len)
 	return offset;
 }
 
-static void send_reply_sz(struct xenstore *xenstore, uint32_t id,
-			  uint32_t msg_type, const char *payload,
-			  int sz)
+static int ring_write(struct xenstore *xenstore, const void *data, size_t len)
 {
+	size_t avail;
+	void *dest;
 	struct xenstore_domain_interface *intf = xenstore->domint;
-	struct xsd_sockmsg h = { .req_id = id, .type = msg_type, .len = sz };
+	XENSTORE_RING_IDX cons, prod;
 
-	if (check_indexes(intf->rsp_cons, intf->rsp_prod)) {
-		intf->rsp_cons = 0;
-		intf->rsp_prod = 0;
+	cons = intf->rsp_cons;
+	prod = intf->rsp_prod;
+	dmb();
+
+	if (check_indexes(cons, prod)) {
+		return -EINVAL;
 	}
 
-	write_xb(intf, (uint8_t *)&h, sizeof(struct xsd_sockmsg));
+	dest = intf->rsp + get_output_offset(cons, prod, &avail);
+	if (avail < len) {
+		len = avail;
+	}
+
+	memcpy(dest, data, len);
+	dmb();
+	intf->rsp_prod += len;
+
 	notify_evtchn(xenstore->local_evtchn);
-	write_xb(intf, (uint8_t *)payload, sz);
-	notify_evtchn(xenstore->local_evtchn);
+
+	return len;
+}
+
+static void invalidate_client(struct xenstore *xenstore, const char *reason, int err)
+{
+	LOG_ERR("Domain#%d xenstore is invalid: %s (err=%d)",
+		xenstore->domain->domid, reason, err);
+	stop_domain_stored(xenstore->domain);
+}
+
+static void handle_output(struct xenstore *xenstore)
+{
+	int ret;
+	struct buffered_data *out;
+
+	out = SYS_SLIST_PEEK_HEAD_CONTAINER(&xenstore->out_list, out, node);
+	if (out == NULL) {
+		return;
+	}
+
+	ret = ring_write(xenstore, out->buffer + out->used,
+			 out->total_size - out->used);
+	if (ret < 0) {
+		goto inv_client;
+	}
+
+	out->used += ret;
+	if (out->used < out->total_size) {
+		return;
+	}
+
+	/*
+	 * This probably won't ever happen, but further code changes
+	 * can break something. So it's better to be safe than sorry.
+	 */
+	__ASSERT_NO_MSG(out->used == out->total_size);
+	sys_slist_remove(&xenstore->out_list, NULL, &out->node);
+	k_free(out->buffer);
+	k_free(out);
+	xenstore->used_out_bufs--;
+
+	return;
+
+inv_client:
+	invalidate_client(xenstore, "Failed to write message", ret);
+}
+
+static bool can_write(struct xenstore *xenstore)
+{
+	struct xenstore_domain_interface *intf = xenstore->domint;
+
+	return !sys_slist_is_empty(&xenstore->out_list) &&
+		((intf->rsp_prod - intf->rsp_cons) < XENSTORE_RING_SIZE);
+}
+
+static void send_reply_sz(struct xenstore *xenstore, uint32_t req_id,
+			  enum xsd_sockmsg_type type, const void *data,
+			  size_t len)
+{
+	struct buffered_data *bdata;
+	struct xsd_sockmsg header;
+	size_t total_size = len + sizeof(header);
+
+	if (xenstore->used_out_bufs > XENSTORE_MAX_OUT_BUF_NUM) {
+		/*
+		 * TODO: check if we can act more softly than invalidating the client.
+		 * Now we invalidate the client, to prevent Denial of Service attacks,
+		 * using several domains, that potentially can eat all Dom0 memory.
+		 */
+		invalidate_client(xenstore,
+				  "The maximum number of output buffers is exceeded",
+				  -EIO);
+		return;
+	}
+
+	if (len > XENSTORE_PAYLOAD_MAX) {
+		LOG_ERR("Failed to reply: payload size too big (%zu max=%d)",
+			len, XENSTORE_PAYLOAD_MAX);
+		send_errno(xenstore, req_id, E2BIG);
+		return;
+	}
+
+	bdata = k_malloc(sizeof(*bdata));
+	if (!bdata) {
+		LOG_ERR("Failed to allocate memory for output buffer");
+		return;
+	}
+
+	bdata->used = 0;
+	bdata->buffer = k_malloc(total_size);
+	if (!bdata->buffer) {
+		k_free(bdata);
+		LOG_ERR("Failed to allocate memory to store output data");
+		return;
+	}
+
+	bdata->total_size = total_size;
+	header.type = type;
+	header.len = len;
+	header.req_id = req_id;
+	memcpy(bdata->buffer, &header, sizeof(header));
+	memcpy(bdata->buffer + sizeof(header), data, len);
+
+	sys_slist_append(&xenstore->out_list, &bdata->node);
+	xenstore->used_out_bufs++;
 }
 
 static void send_reply(struct xenstore *xenstore, uint32_t id,
@@ -1177,9 +1278,12 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 			process_pending_watch_events(domain);
 		}
 
-		if (intf->req_prod <= intf->req_cons)
-		{
+		if ((intf->req_prod <= intf->req_cons) && !can_write(xenstore)) {
 			k_sem_take(&xenstore->xb_sem, K_FOREVER);
+		}
+
+		if (can_write(xenstore)) {
+			handle_output(xenstore);
 		}
 
 		header = (struct xsd_sockmsg*)input_buffer;
@@ -1242,6 +1346,8 @@ int start_domain_stored(struct xen_domain *domain)
 
 	xenstore = &domain->xenstore;
 	xenstore->domain = domain;
+	sys_slist_init(&xenstore->out_list);
+	xenstore->used_out_bufs = 0;
 
 	rc = xenmem_map_region(domain->domid, 1,
 			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
@@ -1295,6 +1401,18 @@ unmap_ring:
 	return rc;
 }
 
+static void free_buffered_data(struct xenstore *xenstore)
+{
+	struct buffered_data *iter, *next;
+
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&xenstore->out_list, iter, next, node) {
+		sys_slist_remove(&xenstore->out_list, NULL, &iter->node);
+		k_free(iter->buffer);
+		k_free(iter);
+		xenstore->used_out_bufs--;
+	}
+}
+
 int stop_domain_stored(struct xen_domain *domain)
 {
 	int rc = 0, err = 0;
@@ -1326,6 +1444,8 @@ int stop_domain_stored(struct xen_domain *domain)
 			domain->domid, rc);
 		err = rc;
 	}
+
+	free_buffered_data(xenstore);
 
 	return err;
 }
