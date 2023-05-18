@@ -275,31 +275,6 @@ static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
 	return MASK_XENSTORE_IDX(prod);
 }
 
-static size_t read_xb(struct xenstore *xenstore, uint8_t *data, uint32_t len)
-{
-	size_t blen = 0;
-	size_t offset = 0;
-	struct xenstore_domain_interface *intf = xenstore->domint;
-
-	do {
-		size_t prod = intf->req_prod;
-		size_t ring_offset = get_input_offset(intf->req_cons, prod, &blen);
-
-		if (blen == 0) {
-			notify_evtchn(xenstore->local_evtchn);
-			return 0;
-		}
-
-		size_t effect = (blen > len) ? len : blen;
-		memcpy(data + offset, intf->req + ring_offset, effect);
-		offset += effect;
-		len -= effect;
-		intf->req_cons += effect;
-	} while (len > 0);
-
-	return offset;
-}
-
 static int ring_write(struct xenstore *xenstore, const void *data, size_t len)
 {
 	size_t avail;
@@ -379,6 +354,13 @@ static bool can_write(struct xenstore *xenstore)
 
 	return !sys_slist_is_empty(&xenstore->out_list) &&
 		((intf->rsp_prod - intf->rsp_cons) < XENSTORE_RING_SIZE);
+}
+
+static bool can_read(struct xenstore *xenstore)
+{
+	struct xenstore_domain_interface *intf = xenstore->domint;
+
+	return (intf->req_prod != intf->req_cons);
 }
 
 static void send_reply_sz(struct xenstore *xenstore, uint32_t req_id,
@@ -1247,18 +1229,135 @@ const struct message_handle message_handle_list[XS_TYPE_COUNT] = { [XS_CONTROL] 
 					    [XS_RESET_WATCHES] = { handle_reset_watches },
 					    [XS_DIRECTORY_PART] = { NULL } };
 
+static int ring_read(struct xenstore *xenstore, void *data, size_t len)
+{
+	size_t avail;
+	const void *src;
+	struct xenstore_domain_interface *intf = xenstore->domint;
+	XENSTORE_RING_IDX cons, prod;
+
+	cons = intf->req_cons;
+	prod = intf->req_prod;
+	dmb();
+
+	if (check_indexes(cons, prod)) {
+		return -EIO;
+	}
+
+	src = intf->req + get_input_offset(cons, prod, &avail);
+	if (avail < len) {
+		len = avail;
+	}
+
+	memcpy(data, src, len);
+	dmb();
+	intf->req_cons += len;
+
+	notify_evtchn(xenstore->local_evtchn);
+
+	return len;
+}
+
+static void process_message(struct xenstore *xenstore)
+{
+	struct xsd_sockmsg *header = (struct xsd_sockmsg *)xenstore->in->buffer;
+	enum xsd_sockmsg_type type = header->type;
+	char *payload = xenstore->in->buffer + sizeof(*header);
+	size_t payload_size = xenstore->in->total_size - sizeof(*header);
+
+	if ((uint32_t)type >= XS_TYPE_COUNT || !message_handle_list[type].h) {
+		LOG_ERR("Client unknown operation %i", type);
+		send_errno(xenstore, 0, ENOSYS);
+		return;
+	}
+
+	message_handle_list[type].h(xenstore, header->req_id,
+				    payload, payload_size);
+
+	k_free(xenstore->in->buffer);
+	k_free(xenstore->in);
+	xenstore->in = NULL;
+}
+
+static void handle_input(struct xenstore *xenstore)
+{
+	int ret;
+	struct xsd_sockmsg header;
+
+	if (!xenstore->in) {
+		xenstore->in = k_malloc(sizeof(*xenstore->in));
+		if (!xenstore->in) {
+			goto alloc_err;
+		}
+		memset(xenstore->in, 0, sizeof(*xenstore->in));
+		xenstore->in->total_size = sizeof(header);
+		xenstore->in->buffer = k_malloc(xenstore->in->total_size);
+		if (!xenstore->in->buffer) {
+			goto alloc_err;
+		}
+	}
+
+	if (xenstore->in->used < sizeof(header)) {
+		ret = ring_read(xenstore, xenstore->in->buffer + xenstore->in->used,
+				sizeof(header) - xenstore->in->used);
+		if (ret < 0) {
+			goto read_err;
+		}
+		xenstore->in->used += ret;
+		if (xenstore->in->used != sizeof(header)) {
+			/* Read the remaining header on the next iteration */
+			return;
+		}
+
+		memcpy(&header, xenstore->in->buffer, sizeof(header));
+		if (header.len > XENSTORE_PAYLOAD_MAX) {
+			LOG_ERR("Failed to handle input: payload size is too big (%u max=%d)",
+				header.len, XENSTORE_PAYLOAD_MAX);
+			k_free(xenstore->in->buffer);
+			k_free(xenstore->in);
+			xenstore->in = NULL;
+			return;
+		}
+
+		xenstore->in->total_size += header.len;
+		k_free(xenstore->in->buffer);
+		xenstore->in->buffer = k_malloc(xenstore->in->total_size);
+		if (!xenstore->in->buffer) {
+			goto alloc_err;
+		}
+
+		memcpy(xenstore->in->buffer, &header, sizeof(header));
+	}
+
+	ret = ring_read(xenstore, xenstore->in->buffer + xenstore->in->used,
+			xenstore->in->total_size - xenstore->in->used);
+	if (ret < 0) {
+		goto read_err;
+	}
+
+	xenstore->in->used += ret;
+	if (xenstore->in->used != xenstore->in->total_size) {
+		return;
+	}
+
+	process_message(xenstore);
+	return;
+
+alloc_err:
+	invalidate_client(xenstore, "Failed to allocate memory for input buffer", -ENOMEM);
+	return;
+
+read_err:
+	invalidate_client(xenstore, "Failed to read input ring buffer", ret);
+}
+
 static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	size_t sz;
-	size_t delta;
-	struct xsd_sockmsg *header;
-	char input_buffer[XENSTORE_RING_SIZE];
 	struct xen_domain *domain = p1;
 	struct xenstore *xenstore = &domain->xenstore;
-	struct xenstore_domain_interface *intf = xenstore->domint;
 
 	xenstore->transaction = 0;
 	xenstore->running_transaction = 0;
@@ -1278,57 +1377,17 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 			process_pending_watch_events(domain);
 		}
 
-		if ((intf->req_prod <= intf->req_cons) && !can_write(xenstore)) {
+		if (!can_read(xenstore) && !can_write(xenstore)) {
 			k_sem_take(&xenstore->xb_sem, K_FOREVER);
+		}
+
+		if (can_read(xenstore)) {
+			handle_input(xenstore);
 		}
 
 		if (can_write(xenstore)) {
 			handle_output(xenstore);
 		}
-
-		header = (struct xsd_sockmsg*)input_buffer;
-		sz = 0;
-
-		do {
-			delta = read_xb(xenstore, (uint8_t *)input_buffer + sz,
-					sizeof(struct xsd_sockmsg));
-
-			if (delta == 0)
-			{
-				/* Missing header data, nothing to read. Perhaps pending watch event from
-				 * different domain. */
-				break;
-			}
-
-			sz += delta;
-		} while (sz < sizeof(struct xsd_sockmsg));
-
-		if (sz == 0)
-		{
-			/* Skip message body processing, as no header received. */
-			continue;
-		}
-
-		sz = 0;
-
-		do
-		{
-			delta = read_xb(xenstore,
-					(uint8_t *)input_buffer + sizeof(struct xsd_sockmsg) + sz,
-					header->len);
-			sz += delta;
-		} while (sz < header->len);
-
-		if (header->type >= XS_TYPE_COUNT ||
-		    message_handle_list[header->type].h == NULL) {
-			LOG_ERR("Unsupported message type: %u", header->type);
-			send_errno(xenstore, header->req_id, ENOSYS);
-		} else {
-			message_handle_list[header->type].h(xenstore, header->req_id,
-							 (char *)(header + 1), header->len);
-		}
-
-		notify_evtchn(xenstore->local_evtchn);
 	}
 
 	/* Need to cleanup all watches and events before destroying */
@@ -1346,6 +1405,7 @@ int start_domain_stored(struct xen_domain *domain)
 
 	xenstore = &domain->xenstore;
 	xenstore->domain = domain;
+	xenstore->in = NULL;
 	sys_slist_init(&xenstore->out_list);
 	xenstore->used_out_bufs = 0;
 
@@ -1410,6 +1470,14 @@ static void free_buffered_data(struct xenstore *xenstore)
 		k_free(iter->buffer);
 		k_free(iter);
 		xenstore->used_out_bufs--;
+	}
+
+	if (xenstore->in) {
+		if (xenstore->in->buffer) {
+			k_free(xenstore->in->buffer);
+		}
+		k_free(xenstore->in);
+		xenstore->in = NULL;
 	}
 }
 

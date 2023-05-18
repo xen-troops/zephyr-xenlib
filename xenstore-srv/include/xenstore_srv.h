@@ -22,6 +22,7 @@ struct buffered_data {
 
 struct xenstore {
 	sys_slist_t out_list;
+	struct buffered_data *in;
 	/* Count the number of used out buffers to prevent Denial of Service attacks */
 	int used_out_bufs;
 	struct xenstore_domain_interface *domint;
