@@ -5,6 +5,9 @@
 
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/memory.h>
+#if defined(CONFIG_XEN_REGIONS)
+#include <zephyr/xen/regions.h>
+#endif
 #include <zephyr/logging/log.h>
 
 #include <mem-mgmt.h>
@@ -99,77 +102,22 @@ uint64_t xenmem_populate_physmap(int domid,
 	return i;
 }
 
-int xenmem_map_region(int domid, uint64_t nr_pages,
-		      uint64_t base_gfn, void **mapped_addr)
+#if defined(CONFIG_XEN_REGIONS)
+static void *get_region_space(uint64_t nr_pages)
 {
-	uint64_t nr_added_pfns, nr_pfn_removed, base_pfn, i, populated_pfns;
-	int rc = -ENOMEM;
-
-	if (!mapped_addr) {
-		return -EINVAL;
-	}
-
-	*mapped_addr = k_aligned_alloc(XEN_PAGE_SIZE,
-				       XEN_PAGE_SIZE * nr_pages);
-	if (!*mapped_addr) {
-		LOG_ERR("Failed to alloc memory for mapping");
-		return -ENOMEM;
-	}
-
-	base_pfn = xen_virt_to_gfn(*mapped_addr);
-	for (i = 0, nr_pfn_removed = 0; i < nr_pages; i++, nr_pfn_removed++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, base_pfn + i);
-		if (rc < 0) {
-			LOG_ERR("Failed to remove PFN#%llu (0x%llx) from physmap (rc=%d)",
-				i, base_pfn + i, rc);
-			/*
-			 * We failed at the first iteration,
-			 * so just free memory
-			 */
-			if (!nr_pfn_removed)
-				goto err_out;
-			goto pfn_remove_err;
-		}
-	}
-
-	nr_added_pfns = xendom_add_to_physmap_batch_by_chunks(domid,
-							      base_pfn,
-							      base_gfn,
-							      nr_pages);
-	if (nr_added_pfns != nr_pages) {
-		goto gfn_add_err;
-	}
-
-	return 0;
-
-gfn_add_err:
-	for (i = 0; i < nr_added_pfns; i++) {
-		rc = xendom_remove_from_physmap(DOMID_SELF, base_pfn + i);
-		if (rc < 0) {
-			LOG_ERR("Failed to remove PFN#%llu (0x%llx) from physmap while restoring Dom0 physmap (rc=%d)",
-				i, base_pfn + i, rc);
-			return rc;
-		}
-	}
-
-pfn_remove_err:
-	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
-						 PFN_4K_SHIFT, nr_pfn_removed);
-	if (populated_pfns != nr_pfn_removed) {
-		LOG_ERR("Failed to populate physmap while restoring Dom0 physmap (populated only %llu instead of %llu)",
-			populated_pfns, nr_pfn_removed);
-		return -EFAULT;
-	}
-
-err_out:
-	k_free(*mapped_addr);
-
-	return rc;
+	return xen_region_get_pages(nr_pages);
 }
 
-int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
+static int put_region_space(void *mapped_addr, uint64_t nr_pages)
 {
-	uint64_t base_pfn, populated_pfns, i;
+	xen_region_put_pages(mapped_addr, nr_pages);
+	return 0;
+}
+#else /* CONFIG_XEN_REGIONS */
+
+static uint64_t region_space_remove(void *mapped_addr, uint64_t nr_pages)
+{
+	uint64_t base_pfn, i;
 	int rc;
 
 	base_pfn = xen_virt_to_gfn(mapped_addr);
@@ -177,23 +125,138 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 	for (i = 0; i < nr_pages; i++) {
 		rc = xendom_remove_from_physmap(DOMID_SELF, base_pfn + i);
 		if (rc < 0) {
-			LOG_ERR("Failed to remove PFN#%llu (0x%llx) from physmap (rc=%d)",
+			LOG_ERR("Failed to remove PFN#%llu (0x%llx) from "
+				"physmap (rc=%d)",
 				i, base_pfn + i, rc);
-			return rc;
+			return i;
 		}
 	}
 
+	return nr_pages;
+}
+
+static void *get_region_space(uint64_t nr_pages)
+{
+	uint64_t nr_pfn_removed, populated_pfns, base_pfn;
+	void *mapped_addr;
+
+	mapped_addr = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	if (!mapped_addr) {
+		LOG_ERR("Failed to alloc memory for mapping");
+		return NULL;
+	}
+
+	nr_pfn_removed = region_space_remove(mapped_addr, nr_pages);
+
+	if (!nr_pfn_removed) {
+		goto err_out;
+	}
+
+	if (nr_pfn_removed != nr_pages) {
+		goto pfn_remove_err;
+	}
+
+	return mapped_addr;
+
+pfn_remove_err:
+	base_pfn = xen_virt_to_gfn(mapped_addr);
+
+	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
+						 PFN_4K_SHIFT, nr_pfn_removed);
+	if (populated_pfns != nr_pfn_removed) {
+		LOG_ERR("Failed to populate physmap while restoring Dom0 physmap (populated only %llu instead of %llu)",
+			populated_pfns, nr_pfn_removed);
+		return NULL;
+	}
+
+err_out:
+	k_free(mapped_addr);
+	return NULL;
+}
+
+static int put_region_space(void *mapped_addr, uint64_t nr_pages)
+{
+	uint64_t base_pfn, populated_pfns;
+
+	base_pfn = xen_virt_to_gfn(mapped_addr);
 	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
 						 PFN_4K_SHIFT, nr_pages);
 	if (populated_pfns != nr_pages) {
-		LOG_ERR("Failed to populate physmap (populated only %llu instead of %llu)",
+		LOG_ERR("Failed to populate physmap (populated only %llu "
+			"instead of %llu)",
 			populated_pfns, nr_pages);
 		return -EFAULT;
 	}
 
 	k_free(mapped_addr);
+	return 0;
+}
+#endif /* CONFIG_XEN_REGIONS */
+
+int xenmem_map_region(int domid, uint64_t nr_pages, uint64_t base_gfn,
+		      void **mapped_addr)
+{
+	uint64_t nr_added_pfns, base_pfn;
+	int rc = -ENOMEM, ret;
+
+	if (!mapped_addr) {
+		return -EINVAL;
+	}
+
+	*mapped_addr = get_region_space(nr_pages);
+	if (!*mapped_addr) {
+		LOG_ERR("Failed to alloc %lld pages for mapping", nr_pages);
+		return -ENOMEM;
+	}
+
+	base_pfn = xen_virt_to_gfn(*mapped_addr);
+	nr_added_pfns = xendom_add_to_physmap_batch_by_chunks(domid,
+							      base_pfn,
+							      base_gfn,
+							      nr_pages);
+
+	if (nr_added_pfns != nr_pages) {
+		goto err_out;
+	}
 
 	return 0;
+
+err_out:
+	/*
+	 * If CONFIG_XEN_REGIONS is not defined we allocate memory from heap
+	 * and remove it from the DOMID_SELF physical map. So, unlike to the
+	 * extended regions, which are not requested from Zephyr physmap, this
+	 * memory should be populated back on error or unmap. For this case
+	 * we split region deallocation to 2 steps to handle case when only
+	 * first N pages were added to the external domain, so we need only
+	 * nr_added_pfns to be populated back to the DOMID_SELF.
+	 */
+#if !defined(CONFIG_XEN_REGIONS)
+	if (region_space_remove(mapped_addr, nr_added_pfns) != nr_added_pfns) {
+		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
+	}
+#endif
+	ret = put_region_space(*mapped_addr, nr_pages);
+	if (ret) {
+		LOG_ERR("Unable to free mapped space: %d", ret);
+	}
+
+	return rc;
+}
+
+int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
+{
+#if !defined(CONFIG_XEN_REGIONS)
+	uint64_t nr_removed_pfns;
+
+	nr_removed_pfns = region_space_remove(mapped_addr, nr_pages);
+
+	if (nr_removed_pfns != nr_pages) {
+		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
+		return -EFAULT;
+	}
+#endif
+	return put_region_space(mapped_addr, nr_pages);
 }
 
 int xenmem_cacheflush_mapped_pfns(uint64_t nr_pages, uint64_t base_pfn)
