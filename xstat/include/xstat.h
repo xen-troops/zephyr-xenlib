@@ -26,6 +26,7 @@ struct xenstat_vcpu {
 
 struct xenstat_domain {
 	unsigned short id;
+	char name[CONTAINER_NAME_SIZE];
 	/* XEN_DOMCTL_* flags are defined in include/zephyr/xen/public/domctl.h */
 	unsigned int state;
 	unsigned long long cpu_ns;
