@@ -13,6 +13,21 @@
 #include <zephyr/xen/dom0/sysctl.h>
 #include <zephyr/xen/public/sched.h>
 #include <xstat.h>
+#ifdef CONFIG_XEN_STORE_SRV
+#include <xss.h>
+#endif
+
+static int xenstat_get_domain_name(unsigned short domain_id, char *name, int len)
+{
+#ifdef CONFIG_XEN_STORE_SRV
+	char path[sizeof("/local/domain/32768/name")];
+
+	snprintf(path, sizeof(path), "/local/domain/%u/name", domain_id);
+	return xss_read(path, name, len);
+#else
+	return -EINVAL;
+#endif
+}
 
 int xstat_getvcpu(struct xenstat_vcpu *info, uint16_t dom, uint16_t vcpu)
 {
@@ -59,6 +74,10 @@ int xstat_getdominfo(struct xenstat_domain *domains, uint16_t first, uint16_t nu
 
 	for (i = 0; i < ret; i++) {
 		domains[i].id = infos[i].domain;
+		if (xenstat_get_domain_name(infos[i].domain, domains[i].name,
+					    CONTAINER_NAME_SIZE)) {
+			domains[i].name[0] = 0;
+		}
 		domains[i].state = infos[i].flags;
 		domains[i].cpu_ns = infos[i].cpu_time;
 		domains[i].num_vcpus = (infos[i].max_vcpu_id + 1);
