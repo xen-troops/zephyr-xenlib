@@ -120,7 +120,7 @@ static int xstat_shell_stat(const struct shell *shell, size_t argc, char **argv)
 		if (domain.id + 1 > max_domid) {
 			max_domid = domain.id + 1;
 		}
-		shell_print(shell, "Domain #%3d", domain.id);
+		shell_print(shell, "Domain #%3d     : %s", domain.id, domain.name);
 		shell_print(shell, "State           : %s", print_state(&domain, buff));
 		shell_print(shell, "CPU ns          : %lld", domain.cpu_ns);
 		shell_print(shell, "VCPUs           : %d", domain.num_vcpus);
