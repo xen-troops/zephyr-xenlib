@@ -70,8 +70,12 @@ static int _vch_notify(struct vch_handle *h, int rw)
 	return 0;
 }
 
-static int _vch_is_live(struct vch_handle *h)
+static bool _vch_is_live(struct vch_handle *h)
 {
+	if (!h || !h->ring) {
+		return false;
+	}
+
 	return h->is_server ? h->ring->cli_live : h->ring->srv_live;
 }
 
@@ -236,6 +240,7 @@ free_evtch:
 	if (h->ring) {
 		k_free(h->ring);
 	}
+	memset(h, 0, sizeof(*h));
 	return rc;
 }
 
@@ -337,6 +342,7 @@ free_gnt:
 	gnttab_put_page(h->ring);
 free_evtch:
 	unbind_event_channel(h->evtch);
+	memset(h, 0, sizeof(*h));
 	return rc;
 }
 
@@ -364,6 +370,7 @@ void vch_close(struct vch_handle *h)
 		gnttab_unmap_refs(&map, 1);
 		gnttab_put_page(h->ring);
 	}
+	memset(h, 0, sizeof(*h));
 }
 
 int vch_read(struct vch_handle *h, void *buf, size_t size)
