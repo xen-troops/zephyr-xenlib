@@ -24,6 +24,8 @@ LOG_MODULE_REGISTER(xenstore);
 
 /* Max string length of int32_t + terminating null symbol */
 #define INT32_MAX_STR_LEN (12)
+/* Max string length of uint32_t + terminating null symbol */
+#define UINT32_MAX_STR_LEN 11
 /* max length of string that holds '/local/domain/%domid/' (domid 0-32767) */
 #define XENSTORE_MAX_LOCALPATH_LEN	21
 
@@ -35,9 +37,16 @@ LOG_MODULE_REGISTER(xenstore);
  */
 #define XENSTORE_MAX_OUT_BUF_NUM 10
 
+struct xs_permissions {
+	sys_snode_t node;
+	enum xs_perm perms;
+	domid_t domid;
+};
+
 struct xs_entry {
 	char *key;
 	char *value;
+	sys_slist_t perms;
 	sys_dlist_t child_list;
 
 	sys_dnode_t node;
@@ -542,6 +551,16 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 	return 0;
 }
 
+static void free_perms(sys_slist_t *list)
+{
+	struct xs_permissions *iter, *next;
+
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(list, iter, next, node) {
+		sys_slist_remove(list, NULL, &iter->node);
+		k_free(iter);
+	}
+}
+
 static void remove_recurse(sys_dlist_t *children)
 {
 	struct xs_entry *entry, *next;
@@ -567,15 +586,175 @@ static void free_node(struct xs_entry *entry)
 		entry->value = NULL;
 	}
 
+	free_perms(&entry->perms);
 	sys_dlist_remove(&entry->node);
 	remove_recurse(&entry->child_list);
 	k_free(entry);
 }
 
-static int xss_do_write(const char *const_path, const char *data)
+static int set_perms_by_array(struct xs_entry *entry,
+			      struct xs_permissions *new_perms,
+			      size_t perms_num)
+{
+	size_t i;
+	struct xs_permissions *perms, *iter, *next;
+	sys_slist_t list_perm;
+
+	sys_slist_init(&list_perm);
+
+	/* Alloc new entries and save it in temporary list before removing old entries */
+	for (i = 0; i < perms_num; i++) {
+		perms = k_malloc(sizeof(*perms));
+		if (!perms) {
+			goto alloc_err;
+		}
+		perms->domid = new_perms[i].domid;
+		perms->perms = new_perms[i].perms;
+		sys_slist_append(&list_perm, &perms->node);
+	}
+
+	free_perms(&entry->perms);
+	/* Here we must use SAFE macros, because we're inserting entries to another list */
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&list_perm, iter, next, node) {
+		sys_slist_append(&entry->perms, &iter->node);
+	}
+
+	return 0;
+
+alloc_err:
+	free_perms(&list_perm);
+	return -ENOMEM;
+}
+
+static struct xs_permissions *deserialize_perms(const char *strings, const size_t str_len,
+						size_t *perms_num)
+{
+	struct xs_permissions *perms;
+	const char *ptr;
+	char *str_endptr;
+	size_t i, j;
+
+	if (!strings || !perms_num) {
+		return NULL;
+	}
+
+	*perms_num = 0;
+	ptr = strings;
+	/* Count the number of perms to further memory allocation */
+	for (i = 0; i < str_len;) {
+		i += strlen(ptr + i) + 1;
+		(*perms_num)++;
+	}
+
+	perms = k_malloc(sizeof(*perms) * (*perms_num));
+	if (!perms) {
+		return NULL;
+	}
+
+	for (i = 0, j = 0; i < str_len && j < (*perms_num); j++) {
+		switch (ptr[i]) {
+		case 'w':
+			perms[j].perms = XS_PERM_WRITE;
+			break;
+		case 'r':
+			perms[j].perms = XS_PERM_READ;
+			break;
+		case 'b':
+			perms[j].perms = (XS_PERM_READ | XS_PERM_WRITE);
+			break;
+		case 'n':
+			perms[j].perms = XS_PERM_NONE;
+			break;
+		default:
+			goto err_free;
+		}
+		if (i + 1 >= str_len) {
+			goto err_free;
+		}
+
+		perms[j].domid = strtoul(ptr + i + 1, &str_endptr, 10);
+		/* If str_endptr is not pointing to terminating null, conversion is failed */
+		if (*str_endptr != '\0') {
+			goto err_free;
+		}
+
+		if (perms[j].domid >= CONFIG_DOM_MAX) {
+			goto err_free;
+		}
+
+		i += strlen(ptr + i) + 1;
+	}
+
+	return perms;
+
+err_free:
+	k_free(perms);
+	*perms_num = 0;
+	return NULL;
+}
+
+static int set_perms_by_strings(struct xs_entry *entry, const char *perm_str,
+				const size_t perms_len)
+{
+	struct xs_permissions *new_perms;
+	size_t perms_num;
+	int rc;
+
+	new_perms = deserialize_perms(perm_str, perms_len, &perms_num);
+	if (!new_perms) {
+		return -EINVAL;
+	}
+
+	rc = set_perms_by_array(entry, new_perms, perms_num);
+	k_free(new_perms);
+
+	return rc;
+}
+
+static int inherit_perms(struct xs_entry *entry,
+			 struct xs_entry *parent_entry,
+			 const uint32_t owner_domid)
+{
+	struct xs_permissions *perms, *iter;
+
+	/* In case it's root entry, we set initial permissions */
+	if (!parent_entry) {
+		perms = k_malloc(sizeof(*perms));
+		if (!perms) {
+			goto ret_err;
+		}
+
+		perms->domid = owner_domid;
+		perms->perms = XS_PERM_NONE;
+		sys_slist_append(&entry->perms, &perms->node);
+
+		return 0;
+	}
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&parent_entry->perms, iter, node) {
+		perms = k_malloc(sizeof(*perms));
+		if (!perms) {
+			goto alloc_err;
+		}
+		perms->domid = iter->domid;
+		perms->perms = iter->perms;
+		sys_slist_append(&entry->perms, &perms->node);
+	}
+
+	return 0;
+
+alloc_err:
+	free_perms(&entry->perms);
+
+ret_err:
+	return -ENOMEM;
+}
+
+static int xss_do_write(const char *const_path, const char *data, uint32_t domid,
+			struct xs_permissions *perms, size_t perms_num)
 {
 	int rc = 0;
-	struct xs_entry *iter = NULL, *insert_entry = NULL;
+	struct xs_entry *iter = NULL, *insert_entry = NULL, *parent_entry = NULL;
 	char *path;
 	char *tok, *tok_state, *new_value;
 	size_t data_len = str_byte_size(data);
@@ -594,6 +773,7 @@ static int xss_do_write(const char *const_path, const char *data)
 
 	for (tok = strtok_r(path, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
 		SYS_DLIST_FOR_EACH_CONTAINER(inspected_list, iter, node) {
+			parent_entry = iter;
 			if (strcmp(iter->key, tok) == 0) {
 				break;
 			}
@@ -617,10 +797,21 @@ static int xss_do_write(const char *const_path, const char *data)
 			memcpy(iter->key, tok, namelen);
 			iter->key[namelen] = 0;
 			iter->value = NULL;
+			sys_slist_init(&iter->perms);
 
 			sys_dlist_init(&iter->child_list);
 			sys_dnode_init(&iter->node);
 			sys_dlist_append(inspected_list, &iter->node);
+			if (perms && perms_num) {
+				rc = set_perms_by_array(iter, perms, perms_num);
+			} else {
+				rc = inherit_perms(iter, parent_entry, domid);
+			}
+			if (rc) {
+				LOG_ERR("Failed to set permissions (rc=%d)", rc);
+				goto free_allocated;
+			}
+
 			if (!insert_entry) {
 				insert_entry = iter;
 			}
@@ -711,13 +902,17 @@ pentry_fail:
 int xss_write(const char *path, const char *value)
 {
 	int rc;
+	struct xs_permissions perms = {
+		.domid = 0,
+		.perms = XS_PERM_NONE,
+	};
 
 	if (!path || !value) {
 		LOG_ERR("Invalid arguments: path or value is NULL");
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value);
+	rc = xss_do_write(path, value, 0, &perms, 1);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
@@ -757,7 +952,24 @@ int xss_read_integer(const char *path, int *value)
 
 int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 {
-	return 0;
+	int rc;
+	struct xs_entry *entry;
+	struct xs_permissions permissions = {
+		.domid = domid,
+		.perms = perm,
+	};
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(path);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		return -ENOENT;
+	}
+
+	rc = set_perms_by_array(entry, &permissions, 1);
+	k_mutex_unlock(&xsel_mutex);
+
+	return rc;
 }
 
 static int construct_data(char *payload, int len, int path_len, char **data)
@@ -814,7 +1026,7 @@ static void _handle_write(struct xenstore *xenstore, uint32_t id,
 		goto free_path;
 	}
 
-	rc = xss_do_write(path, data);
+	rc = xss_do_write(path, data, domain->domid, NULL, 0);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 		send_errno(xenstore, id, rc);
@@ -877,15 +1089,132 @@ static void handle_control(struct xenstore *xenstore, uint32_t id,
 	send_reply(xenstore, id, XS_CONTROL, "OK");
 }
 
+static char perm_to_char(const uint32_t perm)
+{
+	switch (perm & XS_PERM_BOTH) {
+	case XS_PERM_WRITE:
+		return 'w';
+	case XS_PERM_READ:
+		return 'r';
+	case XS_PERM_BOTH:
+		return 'b';
+	default:
+		return 'n';
+	}
+}
+
+/* The function allocates memory for the buffer, that should be freed by caller */
+static char *serialize_perms(struct xs_entry *entry, size_t *total_size)
+{
+	struct xs_permissions *iter;
+	char *perm_str;
+	size_t curr_len = 0, max_len = 0;
+
+	if (!total_size) {
+		return NULL;
+	}
+	*total_size = 0;
+
+	/* Count the maximum needed memory for string at first */
+	SYS_SLIST_FOR_EACH_CONTAINER(&entry->perms, iter, node) {
+		/* max domid value (it counts terminating NULL) + permission char */
+		max_len += UINT32_MAX_STR_LEN + 1;
+	}
+
+	perm_str = k_malloc(max_len);
+	if (!perm_str) {
+		return NULL;
+	}
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&entry->perms, iter, node) {
+		curr_len = snprintf(&perm_str[*total_size], UINT32_MAX_STR_LEN + 1, "%c%u",
+				    perm_to_char(iter->perms), iter->domid);
+		/* Add size for terminating NULL */
+		*total_size += curr_len + 1;
+	}
+
+	return perm_str;
+}
+
 static void handle_get_perms(struct xenstore *xenstore, uint32_t id,
 			     char *payload, uint32_t len)
 {
-	send_errno(xenstore, id, ENOSYS);
+	char *path;
+	char *perm_str;
+	struct xs_entry *entry;
+	int rc;
+	size_t ret_size;
+
+	rc = construct_path(payload, xenstore->domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(xenstore, id, rc);
+		return;
+	}
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(path);
+	k_free(path);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		send_reply(xenstore, id, XS_ERROR, "ENOENT");
+		return;
+	}
+
+	perm_str = serialize_perms(entry, &ret_size);
+	k_mutex_unlock(&xsel_mutex);
+	if (!perm_str) {
+		send_reply(xenstore, id, XS_ERROR, "ENOENT");
+		return;
+	}
+
+	send_reply_sz(xenstore, id, XS_GET_PERMS, perm_str, ret_size);
+	k_free(perm_str);
 }
 
 static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 			     char *payload, uint32_t len)
 {
+	struct xs_entry *entry;
+	char *path, *perm_string;
+	size_t perms_offset, perms_str_size;
+	int rc;
+
+	/*
+	 * Path and perms come inside payload char * and are separated
+	 * with '\0', so we can find path len with strnlen here.
+	 */
+	perms_offset = strnlen(payload, len) + 1;
+	/* Check if we have at least one permission entry */
+	if (perms_offset >= len) {
+		send_errno(xenstore, id, EINVAL);
+		return;
+	}
+	perm_string = payload + perms_offset;
+	perms_str_size = len - perms_offset;
+
+	rc = construct_path(payload, xenstore->domain->domid, &path);
+	if (rc) {
+		LOG_ERR("Failed to construct path (rc=%d)", rc);
+		send_errno(xenstore, id, rc);
+		return;
+	}
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(path);
+	k_free(path);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		return;
+	}
+
+	rc = set_perms_by_strings(entry, perm_string, perms_str_size);
+	k_mutex_unlock(&xsel_mutex);
+	if (rc) {
+		send_errno(xenstore, id, rc);
+		return;
+	}
+
 	send_reply(xenstore, id, XS_SET_PERMS, "OK");
 }
 
