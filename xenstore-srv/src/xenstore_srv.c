@@ -922,6 +922,67 @@ int xss_write(const char *path, const char *value)
 	return rc;
 }
 
+int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domid)
+{
+	int rc;
+	struct xs_permissions perms = {
+		.domid = domid,
+		.perms = XS_PERM_NONE,
+	};
+
+	if (!path || !value || (domid >= CONFIG_DOM_MAX)) {
+		LOG_ERR("Invalid arguments: path/value is NULL or domid bigger than CONFIG_DOM_MAX");
+		return -EINVAL;
+	}
+
+	rc = xss_do_write(path, value, 0, &perms, 1);
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+	} else {
+		notify_watchers(path, 0);
+	}
+
+	return rc;
+}
+
+
+int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domid)
+{
+	int rc;
+	struct xs_permissions perms[2] = {
+		{
+			.domid = 0,
+			.perms = XS_PERM_NONE,
+		},
+		{
+			.domid = domid,
+			.perms = XS_PERM_READ,
+		},
+	};
+
+	if (!path || !value || (domid >= CONFIG_DOM_MAX)) {
+		LOG_ERR("Invalid arguments: path/value is NULL or domid bigger than CONFIG_DOM_MAX");
+		return -EINVAL;
+	}
+
+	/*
+	 * If the function is invoked for Dom0, there is
+	 * no need to set additionally read permission.
+	 */
+	if (domid == 0) {
+		rc = xss_do_write(path, value, 0, perms, 1);
+	} else {
+		rc = xss_do_write(path, value, 0, perms, 2);
+	}
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+	} else {
+		notify_watchers(path, 0);
+	}
+
+	return rc;
+}
+
 int xss_read(const char *path, char *value, size_t len)
 {
 	int rc = -ENOENT;
