@@ -202,6 +202,42 @@ static int construct_path(char *payload, uint32_t domid, char **path)
 	return 0;
 }
 
+static bool is_owner(struct xs_entry *entry, uint32_t caller_domid)
+{
+	struct xs_permissions *owner = SYS_SLIST_PEEK_HEAD_CONTAINER(&entry->perms, owner, node);
+
+	if (owner && owner->domid == caller_domid) {
+		return true;
+	}
+
+	return false;
+}
+
+static bool check_perms(struct xs_entry *entry, uint32_t perms, uint32_t caller_domid)
+{
+	struct xs_permissions *iter, *default_perms;
+
+	/* Caller is Dom0 or owner */
+	if (caller_domid == 0 || is_owner(entry, caller_domid)) {
+		return true;
+	}
+
+	SYS_SLIST_FOR_EACH_CONTAINER(&entry->perms, iter, node) {
+		if (iter->domid == caller_domid) {
+			return ((iter->perms & perms) == perms);
+		}
+	}
+
+	default_perms = SYS_SLIST_PEEK_HEAD_CONTAINER(&entry->perms, default_perms, node);
+
+	/*
+	 * According to specification (https://wiki.xenproject.org/wiki/XenBus):
+	 * "The first element in this list specifies the owner of the path, plus the read
+	 * and write access flags for every domain not explicitly specified subsequently."
+	 */
+	return ((default_perms->perms & perms) == perms);
+}
+
 /*
  * Should be called with xsel_mutex lock and unlock mutex
  * only after all actions with entry will be performed.
@@ -253,6 +289,21 @@ static struct xs_entry *key_to_entry(const char *key)
 	k_free(key_buffer);
 
 	return iter;
+}
+
+/*
+ * Should be called with xsel_mutex lock and unlock mutex
+ * only after all actions with entry will be performed.
+ */
+static struct xs_entry *key_to_entry_check_perm(const char *key, uint32_t domid, uint32_t perms)
+{
+	struct xs_entry *entry = key_to_entry(key);
+
+	if (entry && check_perms(entry, perms, domid)) {
+		return entry;
+	}
+
+	return NULL;
 }
 
 static bool check_indexes(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod)
@@ -471,7 +522,7 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, xenstore->domain->domid, XS_PERM_READ);
 	k_free(path);
 	if (!entry) {
 		goto out;
@@ -514,6 +565,11 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 	loc_len = snprintf(local, sizeof(local), "/local/domain/%d/",
 			   domain->domid);
 	__ASSERT_NO_MSG(loc_len < sizeof(local));
+
+	/* Check permissions */
+	if (!key_to_entry_check_perm(local, domain->domid, XS_PERM_READ)) {
+		return -EACCES;
+	}
 
 	/* This function should be called when we already hold wel_mutex */
 	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
@@ -782,6 +838,12 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 		}
 
 		if (iter == NULL) {
+			if (parent_entry && !check_perms(parent_entry, XS_PERM_WRITE, domid)) {
+				LOG_INF("Permission denied for domid#%u (%s)", domid, path);
+				rc = -EACCES;
+				goto free_allocated;
+			}
+
 			iter = k_malloc(sizeof(*iter));
 			if (!iter) {
 				LOG_ERR("Failed to allocate memory for xs entry");
@@ -823,6 +885,12 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 	}
 
 	if (iter && data_len > 0) {
+		if (!check_perms(iter, XS_PERM_WRITE, domid)) {
+			LOG_INF("Permission denied for domid#%u (%s)", domid, path);
+			rc = -EACCES;
+			goto free_allocated;
+		}
+
 		new_value = k_malloc(data_len);
 		if (!new_value) {
 			LOG_ERR("Failed to allocate memory for xs entry value");
@@ -991,8 +1059,7 @@ int xss_read(const char *path, char *value, size_t len)
 	struct xs_entry *entry;
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
 	if (entry) {
 		strncpy(value, entry->value, len);
 		rc = 0;
@@ -1023,7 +1090,7 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	};
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, 0, XS_PERM_NONE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -1216,7 +1283,7 @@ static void handle_get_perms(struct xenstore *xenstore, uint32_t id,
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, xenstore->domain->domid, XS_PERM_READ);
 	k_free(path);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
@@ -1264,9 +1331,9 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, xenstore->domain->domid, XS_PERM_NONE);
 	k_free(path);
-	if (!entry) {
+	if (!entry && is_owner(entry, xenstore->domain->domid)) {
 		k_mutex_unlock(&xsel_mutex);
 		return;
 	}
@@ -1318,27 +1385,26 @@ static void handle_read(struct xenstore *xenstore, uint32_t id, char *payload,
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(path);
+	entry = key_to_entry_check_perm(path, xenstore->domain->domid, XS_PERM_READ);
 	k_free(path);
 
-	if (entry) {
-		send_reply_read(xenstore, id, XS_READ,
-				entry->value ? entry->value : "");
+	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		send_errno(xenstore, id, ENOENT);
 		return;
 	}
 
+	send_reply_read(xenstore, id, XS_READ,
+			entry->value ? entry->value : "");
 	k_mutex_unlock(&xsel_mutex);
-
-	send_reply(xenstore, id, XS_ERROR, "ENOENT");
 }
 
-static int xss_do_rm(const char *key)
+static int xss_do_rm(const char *key, uint32_t caller_id)
 {
 	struct xs_entry *entry;
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry(key);
+	entry = key_to_entry_check_perm(key, caller_id, XS_PERM_WRITE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -EINVAL;
@@ -1352,7 +1418,7 @@ static int xss_do_rm(const char *key)
 
 int xss_rm(const char *path)
 {
-	int ret = xss_do_rm(path);
+	int ret = xss_do_rm(path, 0);
 
 	if (!ret) {
 		notify_watchers(path, 0);
@@ -1364,7 +1430,7 @@ int xss_rm(const char *path)
 static void handle_rm(struct xenstore *xenstore, uint32_t id, char *payload,
 	       uint32_t len)
 {
-	if (xss_do_rm(payload)) {
+	if (xss_do_rm(payload, xenstore->domain->domid)) {
 		notify_watchers(payload, xenstore->domain->domid);
 		send_reply_read(xenstore, id, XS_RM, "");
 	}
@@ -1437,7 +1503,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	send_reply(xenstore, id, XS_WATCH, "OK");
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	if (key_to_entry(path)) {
+	if (key_to_entry_check_perm(path, domain->domid, XS_PERM_READ)) {
 		pentry = k_malloc(sizeof(*pentry));
 		if (!pentry) {
 			goto pentry_fail;
