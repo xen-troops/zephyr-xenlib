@@ -1871,6 +1871,45 @@ static void free_buffered_data(struct xenstore *xenstore)
 	}
 }
 
+static void remove_ref_entries_recursive(uint32_t domid, sys_dlist_t *chlds)
+{
+	struct xs_entry *entry, *next;
+	struct xs_permissions *perms, *iter_perm, *next_perm;
+	sys_snode_t *prev_node;
+
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(chlds, entry, next, node) {
+		perms = SYS_SLIST_PEEK_HEAD_CONTAINER(&entry->perms, perms, node);
+		if (perms->domid == domid) {
+			free_node(entry);
+		} else {
+			prev_node = NULL;
+			SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&entry->perms, iter_perm,
+							  next_perm, node) {
+				if (iter_perm->domid == domid) {
+					sys_slist_remove(&entry->perms,
+							 prev_node,
+							 &iter_perm->node);
+					k_free(iter_perm);
+				} else {
+					prev_node = &iter_perm->node;
+				}
+			}
+			remove_ref_entries_recursive(domid, &entry->child_list);
+		}
+	}
+}
+
+/*
+ * The entries, where domain is owner should be removed with children.
+ * Also, remove domid from the other domains permissions
+ */
+static void remove_ref_entries(uint32_t domid)
+{
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	remove_ref_entries_recursive(domid, &root_xenstore.child_list);
+	k_mutex_unlock(&xsel_mutex);
+}
+
 int stop_domain_stored(struct xen_domain *domain)
 {
 	int rc = 0, err = 0;
@@ -1904,6 +1943,7 @@ int stop_domain_stored(struct xen_domain *domain)
 	}
 
 	free_buffered_data(xenstore);
+	remove_ref_entries(domain->domid);
 
 	return err;
 }
