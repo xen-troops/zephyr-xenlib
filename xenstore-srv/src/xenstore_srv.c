@@ -36,6 +36,8 @@ LOG_MODULE_REGISTER(xenstore);
  * while domain is not reading responses.
  */
 #define XENSTORE_MAX_OUT_BUF_NUM 10
+#define INIT_XENSTORE_BUFF_SIZE 80
+#define INIT_XENSTORE_UUID_BUF_SIZE 40
 
 struct xs_permissions {
 	sys_snode_t node;

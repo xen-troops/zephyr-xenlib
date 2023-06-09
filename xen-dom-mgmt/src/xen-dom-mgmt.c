@@ -638,26 +638,25 @@ static void deinitialize_domain_xenstore(uint32_t domid)
 	xss_rm(path);
 }
 
-static void initialize_xenstore(uint32_t domid,
-				const struct xen_domain_cfg *domcfg,
-				const struct xen_domain *domain)
+static int initialize_xenstore(uint32_t domid,
+			       const struct xen_domain_cfg *domcfg,
+			       const struct xen_domain *domain)
 {
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char uuid[INIT_XENSTORE_UUID_BUF_SIZE];
+	int rc;
 	static const char basepref[] = "/local/domain";
-	static const char * const dirs[] = { "data",
+	static const char * const rw_dirs[] = { "data",
 			 "drivers",
 			 "feature",
 			 "attr",
 			 "error",
-			 "control",
 			 "control/shutdown",
 			 "control/feature-poweroff",
 			 "control/feature-reboot",
 			 "control/feature-suspend",
 			 "control/sysrq",
-			 "device/vbd",
 			 "device/suspend/event-channel",
 			 NULL };
 
@@ -666,23 +665,48 @@ static void initialize_xenstore(uint32_t domid,
 
 	for (int i = 0; i < domcfg->max_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
-		xss_write(lbuffer, "online");
+		rc = xss_write_guest_domain_ro(lbuffer, "online", domid);
+		if (rc) {
+			goto deinit;
+		}
 	}
 
 	sprintf(lbuffer, "%s/%d/memory/static-max", basepref, domid);
 	sprintf(rbuffer, "%lld", domain->max_mem_kb);
-	xss_write(lbuffer, rbuffer);
+	rc = xss_write_guest_domain_ro(lbuffer, rbuffer, domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "%s/%d/memory/target", basepref, domid);
-	xss_write(lbuffer, rbuffer);
+	rc = xss_write_guest_domain_ro(lbuffer, rbuffer, domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "%s/%d/memory/videoram", basepref, domid);
-	xss_write(lbuffer, "-1");
+	rc = xss_write_guest_domain_ro(lbuffer, "-1", domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "%s/%d/control/platform-feature-multiprocessor-suspend", basepref, domid);
-	xss_write(lbuffer, "1");
+	rc = xss_write_guest_domain_ro(lbuffer, "1", domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "%s/%d/control/platform-feature-xs_reset_watches", basepref, domid);
-	xss_write(lbuffer, "1");
+	rc = xss_write_guest_domain_ro(lbuffer, "1", domid);
+	if (rc) {
+		goto deinit;
+	}
 
 	sprintf(lbuffer, "%s/%d/vm", basepref, domid);
-	xss_write(lbuffer, uuid);
+	rc = xss_write_guest_domain_ro(lbuffer, uuid, domid);
+	if (rc) {
+		goto deinit;
+	}
 
 	sprintf(lbuffer, "/vm/%s/name", uuid);
 	if (domain->name[0]) {
@@ -690,27 +714,74 @@ static void initialize_xenstore(uint32_t domid,
 	} else {
 		sprintf(rbuffer, "zephyr-%d", domid);
 	}
-	xss_write(lbuffer, rbuffer);
+	rc = xss_write_guest_domain_ro(lbuffer, rbuffer, domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "%s/%d/name", basepref, domid);
-	xss_write(lbuffer, rbuffer);
+	rc = xss_write_guest_domain_ro(lbuffer, rbuffer, domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "/vm/%s/start_time", uuid);
-	xss_write(lbuffer, "0");
+	rc = xss_write_guest_domain_ro(lbuffer, "0", domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "/vm/%s/uuid", uuid);
-	xss_write(lbuffer, uuid);
+	rc = xss_write_guest_domain_ro(lbuffer, uuid, domid);
+	if (rc) {
+		goto deinit;
+	}
 
 	sprintf(lbuffer, "%s/%d/domid", basepref, domid);
 	sprintf(rbuffer, "%d", domid);
-	xss_write(lbuffer, rbuffer);
+	rc = xss_write_guest_domain_ro(lbuffer, rbuffer, domid);
+	if (rc) {
+		goto deinit;
+	}
 
-	for (int i = 0; dirs[i]; ++i) {
-		sprintf(lbuffer, "%s/%d/%s", basepref, domid, dirs[i]);
-		xss_write(lbuffer, "");
+	sprintf(lbuffer, "%s/%d/control", basepref, domid);
+	rc = xss_write_guest_domain_ro(lbuffer, "", domid);
+	if (rc) {
+		goto deinit;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd", basepref, domid);
+	rc = xss_write_guest_domain_ro(lbuffer, "", domid);
+	if (rc) {
+		goto deinit;
+	}
+
+	for (int i = 0; rw_dirs[i]; ++i) {
+		sprintf(lbuffer, "%s/%d/%s", basepref, domid, rw_dirs[i]);
+		rc = xss_write_guest_domain_rw(lbuffer, "", domid);
+		if (rc) {
+			goto deinit;
+		}
 	}
 
 	sprintf(lbuffer, "/libxl/%d/dm-version", domid);
-	xss_write(lbuffer, "qemu_xen_traditional");
+	rc = xss_write(lbuffer, "qemu_xen_traditional");
+	if (rc) {
+		goto deinit;
+	}
+
 	sprintf(lbuffer, "/libxl/%d/type", domid);
-	xss_write(lbuffer, "pvh");
+	rc = xss_write(lbuffer, "pvh");
+	if (rc) {
+		goto deinit;
+	}
+
+	return 0;
+
+deinit:
+	deinitialize_domain_xenstore(domid);
+	LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)", domid, rc);
+	return rc;
 }
 
 static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
@@ -757,7 +828,7 @@ static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device
 	dom0->max_mem_kb = 0;
 #endif
 	xss_write("/tool/xenstored", "");
-	initialize_xenstore(0, dom0cfg, dom0);
+	ret = initialize_xenstore(0, dom0cfg, dom0);
 out:
 #ifdef CONFIG_XSTAT
 	k_free(dom0stat);
@@ -888,7 +959,10 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 #endif
 
-	initialize_xenstore(domid, domcfg, domain);
+	rc = initialize_xenstore(domid, domcfg, domain);
+	if (rc) {
+		goto stop_domain_console;
+	}
 
 	if (domid == DOMID_DOMD) {
 		rc = xen_domctl_unpausedomain(domid);
