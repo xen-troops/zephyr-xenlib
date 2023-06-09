@@ -664,8 +664,6 @@ static void initialize_xenstore(uint32_t domid,
 	// TODO: generate properly
 	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
 
-	xss_write("/tool/xenstored", "");
-
 	for (int i = 0; i < domcfg->max_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
 		xss_write(lbuffer, "online");
@@ -758,6 +756,7 @@ static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device
 	dom0cfg->mem_kb = 0;
 	dom0->max_mem_kb = 0;
 #endif
+	xss_write("/tool/xenstored", "");
 	initialize_xenstore(0, dom0cfg, dom0);
 out:
 #ifdef CONFIG_XSTAT
