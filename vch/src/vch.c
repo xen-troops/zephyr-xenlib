@@ -161,7 +161,7 @@ int vch_open(domid_t domain, const char *path, size_t min_rs, size_t min_ws,
 
 	rc = alloc_unbound_event_channel(domain);
 	if (rc < 0) {
-		return rc;
+		goto free_evtch;
 	}
 
 	h->evtch = rc;
