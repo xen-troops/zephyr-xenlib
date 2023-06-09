@@ -43,6 +43,8 @@
 LOG_MODULE_REGISTER(xen_dom_mgmt);
 
 #define DOM0_XENSTORE_PRIORITY 45
+#define INIT_XENSTORE_BUFF_SIZE 80
+#define INIT_XENSTORE_UUID_BUF_SIZE 40
 BUILD_ASSERT(DOM0_XENSTORE_PRIORITY > CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 struct modules_address {
@@ -618,17 +620,31 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 	return NULL;
 }
 
+static void deinitialize_domain_xenstore(uint32_t domid)
+{
+	char uuid[INIT_XENSTORE_UUID_BUF_SIZE] = { 0 };
+	char path[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+
+	// TODO: generate properly
+	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
+
+	sprintf(path, "/local/domain/%d", domid);
+	xss_rm(path);
+
+	snprintf(path, INIT_XENSTORE_BUFF_SIZE, "/vm/%s", uuid);
+	xss_rm(path);
+
+	snprintf(path, INIT_XENSTORE_BUFF_SIZE, "/libxl/%d", domid);
+	xss_rm(path);
+}
+
 static void initialize_xenstore(uint32_t domid,
 				const struct xen_domain_cfg *domcfg,
 				const struct xen_domain *domain)
 {
-#if defined INIT_XENSTORE_BUFF_SIZE
-#warning "INIT_XENSTORE_BUFF_SIZE already defined somewhere"
-#endif
-#define INIT_XENSTORE_BUFF_SIZE 80
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
-	char uuid[40];
+	char uuid[INIT_XENSTORE_UUID_BUF_SIZE];
 	static const char basepref[] = "/local/domain";
 	static const char * const dirs[] = { "data",
 			 "drivers",
@@ -646,7 +662,7 @@ static void initialize_xenstore(uint32_t domid,
 			 NULL };
 
 	// TODO: generate properly
-	snprintf(uuid, 40, "00000000-0000-0000-0000-%012d", domid);
+	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
 
 	xss_write("/tool/xenstored", "");
 
@@ -697,7 +713,6 @@ static void initialize_xenstore(uint32_t domid,
 	xss_write(lbuffer, "qemu_xen_traditional");
 	sprintf(lbuffer, "/libxl/%d/type", domid);
 	xss_write(lbuffer, "pvh");
-#undef INIT_XENSTORE_BUFF_SIZE
 }
 
 static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
@@ -925,6 +940,8 @@ int domain_destroy(uint32_t domid)
 		LOG_ERR("Failed to stop domain#%u store (rc=%d)", domain->domid, rc);
 		err = rc;
 	}
+
+	deinitialize_domain_xenstore(domid);
 
 #ifdef CONFIG_XEN_CONSOLE_SRV
 	rc = xen_stop_domain_console(domain);
