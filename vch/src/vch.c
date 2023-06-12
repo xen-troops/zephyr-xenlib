@@ -201,12 +201,7 @@ int vch_open(domid_t domain, const char *path, size_t min_rs, size_t min_ws,
 	 * With current code it is possible that it will see only ring-ref
 	 * because event-channel is not yet ready.
 	 */
-	rc = xss_write(xs_key_scratch, xs_val_scratch);
-	if (rc) {
-		goto free_gnt;
-	}
-
-	rc = xss_set_perm(xs_key_scratch, domain, XS_PERM_READ);
+	rc = xss_write_guest_domain_ro(xs_key_scratch, xs_val_scratch, domain);
 	if (rc) {
 		goto free_gnt;
 	}
@@ -214,12 +209,7 @@ int vch_open(domid_t domain, const char *path, size_t min_rs, size_t min_ws,
 	snprintf(xs_key_scratch, sizeof(xs_key_scratch),
 		 "%s/event-channel", h->path);
 	snprintf(xs_val_scratch, sizeof(xs_val_scratch), "%u", h->evtch);
-	rc = xss_write(xs_key_scratch, xs_val_scratch);
-	if (rc) {
-		goto free_gnt;
-	}
-
-	rc = xss_set_perm(xs_key_scratch, domain, XS_PERM_READ);
+	rc = xss_write_guest_domain_ro(xs_key_scratch, xs_val_scratch, domain);
 	if (rc) {
 		goto free_gnt;
 	}
