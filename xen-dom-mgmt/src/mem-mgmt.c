@@ -219,6 +219,10 @@ int xenmem_map_region(int domid, uint64_t nr_pages, uint64_t base_gfn,
 		goto err_out;
 	}
 
+#if defined(CONFIG_XEN_REGIONS)
+	xen_region_map(*mapped_addr, nr_pages);
+#endif
+
 	return 0;
 
 err_out:
@@ -255,6 +259,8 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
 		return -EFAULT;
 	}
+#else
+	xen_region_unmap(mapped_addr, nr_pages);
 #endif
 	return put_region_space(mapped_addr, nr_pages);
 }
