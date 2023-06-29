@@ -736,10 +736,6 @@ static struct xs_permissions *deserialize_perms(const char *strings, const size_
 			goto err_free;
 		}
 
-		if (perms[j].domid >= CONFIG_DOM_MAX) {
-			goto err_free;
-		}
-
 		i += strlen(ptr + i) + 1;
 	}
 
@@ -1000,8 +996,8 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
 		.perms = XS_PERM_NONE,
 	};
 
-	if (!path || !value || (domid >= CONFIG_DOM_MAX)) {
-		LOG_ERR("Invalid arguments: path/value is NULL or domid bigger than CONFIG_DOM_MAX");
+	if (!path || !value) {
+		LOG_ERR("Invalid arguments: path or value is NULL");
 		return -EINVAL;
 	}
 
@@ -1030,8 +1026,8 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 		},
 	};
 
-	if (!path || !value || (domid >= CONFIG_DOM_MAX)) {
-		LOG_ERR("Invalid arguments: path/value is NULL or domid bigger than CONFIG_DOM_MAX");
+	if (!path || !value) {
+		LOG_ERR("Invalid arguments: path or value is NULL");
 		return -EINVAL;
 	}
 
