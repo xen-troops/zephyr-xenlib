@@ -492,7 +492,6 @@ static void send_reply_read(struct xenstore *xenstore, uint32_t id,
 static void send_errno(struct xenstore *xenstore, uint32_t id, int err)
 {
 	unsigned int i;
-	LOG_ERR("Sending error=%d", err);
 
 	for (i = 0; err != xsd_errors[i].errnum; i++) {
 		if (i == ARRAY_SIZE(xsd_errors) - 1) {
