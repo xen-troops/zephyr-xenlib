@@ -9,7 +9,6 @@
 #ifndef _XSTAT_H
 #define _XSTAT_H
 
-#include <zephyr/shell/shell.h>
 #include <zephyr/xen/public/version.h>
 #include <zephyr/xen/public/domctl.h>
 #include <zephyr/xen/public/sched.h>
