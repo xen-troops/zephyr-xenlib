@@ -6,7 +6,6 @@
 
 #include <string.h>
 #include <stdio.h>
-#include <zephyr/shell/shell.h>
 #include <zephyr/arch/arm64/hypercall.h>
 #include <zephyr/xen/dom0/version.h>
 #include <zephyr/xen/dom0/domctl.h>
