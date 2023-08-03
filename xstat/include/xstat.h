@@ -15,6 +15,10 @@
 #include <zephyr/xen/generic.h>
 #include <domain.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SHORT_ASC_LEN 5                 /* length of 65535 */
 #define VERSION_SIZE (2 * SHORT_ASC_LEN + 1 + XEN_EXTRAVERSION_LEN + 1)
 
@@ -46,4 +50,9 @@ struct xenstat {
 int xstat_getstat(struct xenstat *stat);
 int xstat_getdominfo(struct xenstat_domain *info, uint16_t first, uint16_t num);
 int xstat_getvcpu(struct xenstat_vcpu *info, uint16_t dom, uint16_t vcpu);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
