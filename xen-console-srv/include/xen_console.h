@@ -8,6 +8,9 @@
 
 #include <zephyr/shell/shell.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Start console thread in dom0, that reads domain output.
@@ -39,5 +42,8 @@ int xen_stop_domain_console(struct xen_domain *domain);
 int xen_attach_domain_console(const struct shell *shell,
 			      struct xen_domain *domain);
 
-#endif /* XENLIB_XEN_CONSOLE_H */
+#ifdef __cplusplus
+}
+#endif
 
+#endif /* XENLIB_XEN_CONSOLE_H */
