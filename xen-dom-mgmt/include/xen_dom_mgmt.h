@@ -9,9 +9,17 @@
 
 #include <domain.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid);
 int domain_destroy(uint32_t domid);
 int domain_pause(uint32_t domid);
 int domain_unpause(uint32_t domid);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

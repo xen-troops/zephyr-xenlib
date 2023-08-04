@@ -17,6 +17,10 @@
 #define PFN_2M_SIZE (PFN_4K_SIZE << LPAE_SHIFT)
 #define PFN_1G_SIZE (PFN_2M_SIZE << LPAE_SHIFT)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Allocates memory in Dom0 and maps guest memory to this region.
  * In case of any error, the function will try to restore
@@ -71,5 +75,9 @@ uint64_t xenmem_populate_physmap(int domid,
 				 uint64_t base_pfn,
 				 uint64_t pfn_shift,
 				 uint64_t nr_pages);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

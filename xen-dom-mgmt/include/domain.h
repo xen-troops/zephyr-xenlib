@@ -20,6 +20,10 @@
 #define DOM0_NAME "Domain-0"
 #define CONTAINER_NAME_SIZE 64
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
 	uint64_t first_gfn;
@@ -123,5 +127,9 @@ struct xen_domain {
 };
 
 struct xen_domain *domid_to_domain(uint32_t domid);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* XENLIB_XEN_DOMAIN_H */
