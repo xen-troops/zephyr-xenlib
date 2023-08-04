@@ -8,6 +8,10 @@
 #pragma once
 #include <zephyr/xen/public/xen.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum xs_perm {
 	XS_PERM_NONE = 0x0,
 	XS_PERM_READ = 0x1,
@@ -78,3 +82,7 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
  * @return 0 on success, a negative errno value on error.
  */
 int xss_rm(const char *path);
+
+#ifdef __cplusplus
+}
+#endif
