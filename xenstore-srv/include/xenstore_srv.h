@@ -9,6 +9,10 @@
 
 #include "xen/public/io/xs_wire.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct buffered_data {
 	/* Used to link buffers into singly-linked list */
 	sys_snode_t node;
@@ -41,5 +45,9 @@ struct xenstore {
 
 int start_domain_stored(struct xen_domain *domain);
 int stop_domain_stored(struct xen_domain *domain);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
