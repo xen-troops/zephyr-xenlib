@@ -9,6 +9,10 @@
 #include <sys/types.h>
 #include <zephyr/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * @brief Read buffer fron file on storage
  *
@@ -30,5 +34,9 @@ ssize_t xrun_read_file(const char *fpath, char *buf,
  * @return - file size or -errno on error
  */
 ssize_t xrun_get_file_size(const char *fpath);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* XENLIB_XRUN_STORAGE_H */

@@ -6,6 +6,10 @@
 #ifndef XRUN_H_
 #define XRUN_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum container_status {
 	RUNNING = 0,
 	PAUSED,
@@ -60,5 +64,9 @@ int xrun_kill(const char *container_id);
  * @return 0 on success and errno on error
  */
 int xrun_state(const char *container_id, enum container_status *state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* XRUN_H_ */
