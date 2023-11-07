@@ -20,6 +20,7 @@
 
 #include <storage.h>
 #include <xen_dom_mgmt.h>
+#include <xl_parser.h>
 #include "xrun.h"
 
 LOG_MODULE_REGISTER(xrun);
@@ -383,6 +384,13 @@ static int fill_domcfg(struct xen_domain_cfg *domcfg, struct domain_spec *spec,
 		domcfg->dtb_end = NULL;
 	}
 
+	/* Parse and fill backend configuration */
+	memset(&domcfg->back_cfg, 0, sizeof(domcfg->back_cfg));
+
+	for (i = 0; i < spec->vm.kernel.params_len; i++) {
+		parse_one_record_and_fill_cfg(spec->vm.kernel.parameters[i], &domcfg->back_cfg);
+	}
+
 	return 0;
 }
 
@@ -588,6 +596,12 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	}
 
 	ret = domain_create(&domcfg, container->domid);
+	if (ret) {
+		k_mutex_unlock(&container_run_lock);
+		goto err_config;
+	}
+
+	ret = domain_post_create(&domcfg, container->domid);
 	if (ret) {
 		k_mutex_unlock(&container_run_lock);
 		goto err_config;
