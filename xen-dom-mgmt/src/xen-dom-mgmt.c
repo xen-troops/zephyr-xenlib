@@ -67,6 +67,17 @@ static int dom_num = 0;
 #define XEN_VERSION_MINOR 16
 #endif
 
+/*
+ * According to: https://xenbits.xen.org/docs/unstable/man/xen-vbd-interface.7.html
+ * XEN_XVD_DP_NOMINAL_TYPE represents block devices as xvd-type,
+ * whith disks and up to 15 partitions.
+ *
+ * XEN_XVD_DP_DISK_MAX_INDEX is a maximum number of disks, for the
+ * XEN_XVD_DP_NOMINAL_TYPE.
+ */
+#define XEN_XVD_DP_NOMINAL_TYPE (202 << 8)
+#define XEN_XVD_DP_DISK_MAX_INDEX ((1 << 20) - 1)
+
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 K_MUTEX_DEFINE(dl_mutex);
 
@@ -638,6 +649,383 @@ static void deinitialize_domain_xenstore(uint32_t domid)
 	xss_rm(path);
 }
 
+/* According to: https://xenbits.xen.org/docs/unstable/man/xen-vbd-interface.7.html */
+static int get_xvd_disk_id(const char *vname)
+{
+	int index, vname_length;
+	int part = 0;
+
+	if (!vname)
+		return 0;
+
+	vname_length = strlen(vname);
+
+	if ((vname_length > 4) || strncmp(vname, "xvd", 3) ||
+		vname[3] < 'a' || vname[3] > 'z')
+		return 0;
+
+	index = vname[3] - 'a';
+
+	if (index > XEN_XVD_DP_DISK_MAX_INDEX)
+		return 0;
+
+	return XEN_XVD_DP_NOMINAL_TYPE | (index << 4) | part;
+}
+
+static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int domid)
+{
+	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	static const char basepref[] = "/local/domain";
+	int rc, backendid, vbd_id;
+
+	if (!cfg->configured)
+		return 0;
+
+	backendid = cfg->backend_domain_id;
+	vbd_id = get_xvd_disk_id(cfg->vdev);
+
+	if (!vbd_id)
+		return -EINVAL;
+
+	/* Backend domain part */
+
+	sprintf(lbuffer, "%s/%d/backend", basepref, backendid);
+	rc = xss_write_guest_domain_ro(lbuffer, "", backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd", basepref, backendid);
+	rc = xss_write_guest_domain_ro(lbuffer, "", backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d", basepref, backendid, domid);
+	rc = xss_write_guest_domain_ro(lbuffer, "", backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/frontend", basepref, backendid, domid, vbd_id);
+	sprintf(rbuffer, "/local/domain/%d/device/vbd/%d", domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/params", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->target, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/script", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->script, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/frontend-id", basepref, backendid, domid, vbd_id);
+	sprintf(rbuffer, "%d", domid);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/online", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/removable", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "0", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/bootable", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/state", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/dev", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->vdev, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/type", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->backendtype, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/mode", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "w", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/device-type", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "disk", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/discard-enable",
+			basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/multi-queue-max-queues",
+			basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "4", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	/* Guest domain part */
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/backend", basepref, domid, vbd_id);
+	sprintf(rbuffer, "%s/1/backend/vbd/%d/%d", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/backend-id", basepref, domid, vbd_id);
+	sprintf(rbuffer, "%d", backendid);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/state", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/virtual-device", basepref, domid, vbd_id);
+	sprintf(rbuffer, "%d", vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/device-type", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "disk", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/event-channel", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	return 0;
+}
+
+static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid, int instance_id)
+{
+	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	static const char basepref[] = "/local/domain";
+	int rc, backendid;
+
+	if (!cfg->configured)
+		return 0;
+
+	backendid = cfg->backend_domain_id;
+
+	/* VIF Backend domain part */
+
+	sprintf(lbuffer, "%s/%d/backend/vif", basepref, backendid);
+	rc = xss_write_guest_with_permissions(lbuffer, "", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d", basepref, backendid, domid);
+	rc = xss_write_guest_with_permissions(lbuffer, "", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/frontend",
+			basepref, backendid, domid, instance_id);
+	sprintf(rbuffer, "/local/domain/%d/device/vif/%d", domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/frontend-id",
+			basepref, backendid, domid, instance_id);
+	sprintf(rbuffer, "%d", domid);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/state", basepref,
+			backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/online", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/script", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->script, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/mac", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->mac, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/bridge", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->bridge, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/handle", basepref, backendid, domid, instance_id);
+	sprintf(rbuffer, "%d", instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/type", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->type, backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/hotplug-status",
+			basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	if (cfg->ip[0]) {
+		sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/ip",
+				basepref, backendid, domid, instance_id);
+		rc = xss_write_guest_with_permissions(lbuffer, cfg->ip, backendid, domid);
+		if (rc) {
+			return rc;
+		}
+	}
+
+	/* VIF domain part */
+
+	sprintf(lbuffer, "%s/%d/device/vif", basepref, domid);
+	rc = xss_write_guest_with_permissions(lbuffer, "", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/backend", basepref, domid, instance_id);
+	sprintf(rbuffer, "/local/domain/%d/backend/vif/%d/%d", backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/backend-id", basepref, domid, instance_id);
+	sprintf(rbuffer, "%d", backendid);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/state", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/handle", basepref, domid, instance_id);
+	sprintf(rbuffer, "%d", instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/mac", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, cfg->mac, domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/mtu", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1500", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/multi-queue-num-queues",
+			basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/request-rx-copy", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
+
+	return rc;
+}
+
 static int initialize_xenstore(uint32_t domid,
 			       const struct xen_domain_cfg *domcfg,
 			       const struct xen_domain *domain)
@@ -1069,6 +1457,40 @@ int domain_unpause(uint32_t domid)
 	}
 
 	return xen_domctl_unpausedomain(domid);
+}
+
+int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
+{
+	int rc, i;
+
+	for (i = 0; i < MAX_PV_BLOCK_DEVICES; i++) {
+		if (domcfg->back_cfg.disks[i].configured) {
+			rc = add_pvblock_xenstore(&domcfg->back_cfg.disks[i], domid);
+			if (rc) {
+				LOG_ERR("Failed to initialize pvblock for domid#%u (rc=%d)",
+					domid, rc);
+				goto deinit;
+			}
+		}
+	}
+
+	for (i = 0; i < MAX_PV_NET_DEVICES; i++) {
+		if (domcfg->back_cfg.vifs[i].configured) {
+			rc = add_pvnet_xenstore(&domcfg->back_cfg.vifs[i], domid, i);
+			if (rc) {
+				LOG_ERR("Failed to initialize pvnet for domid#%u (rc=%d)",
+					domid, rc);
+				goto deinit;
+			}
+		}
+	}
+
+	return 0;
+
+deinit:
+	LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)", domid, rc);
+	domain_destroy(domid);
+	return rc;
 }
 
 SYS_INIT(initialize_dom0_xenstore, APPLICATION, DOM0_XENSTORE_PRIORITY);
