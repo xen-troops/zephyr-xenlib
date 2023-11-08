@@ -576,7 +576,8 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 		size_t token_len, payload_len;
 		size_t epath_len = pendkey_len + 1;
 
-		if (memcmp(iter->key, epath_buf, strlen(iter->key))) {
+		if ((iter->domain->domid != domain->domid) ||
+		     memcmp(iter->key, epath_buf, strlen(iter->key))) {
 			continue;
 		}
 
