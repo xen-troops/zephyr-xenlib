@@ -1065,6 +1065,37 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	return rc;
 }
 
+int xss_write_guest_with_permissions(const char *path, const char *value, uint32_t domid1,
+				     uint32_t domid2)
+{
+	int rc;
+	struct xs_permissions perms[2] = {
+		{
+			.domid = domid1,
+			.perms = XS_PERM_NONE,
+		},
+		{
+			.domid = domid2,
+			.perms = XS_PERM_READ,
+		},
+	};
+
+	if (!path || !value) {
+		LOG_ERR("Invalid arguments: path or value is NULL");
+		return -EINVAL;
+	}
+
+	rc = xss_do_write(path, value, 0, perms, 2);
+
+	if (rc) {
+		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
+	} else {
+		notify_watchers(path, 0);
+	}
+
+	return rc;
+}
+
 int xss_read(const char *path, char *value, size_t len)
 {
 	int rc = -ENOENT;
