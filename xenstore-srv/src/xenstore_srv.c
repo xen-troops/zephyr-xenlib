@@ -35,7 +35,7 @@ LOG_MODULE_REGISTER(xenstore);
  * This limit is needed to prevent Denial of Service attacks,
  * while domain is not reading responses.
  */
-#define XENSTORE_MAX_OUT_BUF_NUM 10
+#define XENSTORE_MAX_OUT_BUF_NUM 100
 #define INIT_XENSTORE_BUFF_SIZE 80
 #define INIT_XENSTORE_UUID_BUF_SIZE 40
 
