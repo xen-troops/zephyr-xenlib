@@ -925,8 +925,7 @@ static void notify_watchers(const char *path, uint32_t caller_domid)
 
 	k_mutex_lock(&wel_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
-		if (iter->domain->domid == caller_domid ||
-		    strncmp(iter->key, path, strlen(iter->key))) {
+		if (strncmp(iter->key, path, strlen(iter->key))) {
 			continue;
 		}
 
