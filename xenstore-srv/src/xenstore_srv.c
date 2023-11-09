@@ -295,11 +295,20 @@ static struct xs_entry *key_to_entry(const char *key)
  * Should be called with xsel_mutex lock and unlock mutex
  * only after all actions with entry will be performed.
  */
+static bool check_perms_for_entry(struct xs_entry *entry, uint32_t domid, uint32_t perms)
+{
+	return entry && check_perms(entry, perms, domid);
+}
+
+/*
+ * Should be called with xsel_mutex lock and unlock mutex
+ * only after all actions with entry will be performed.
+ */
 static struct xs_entry *key_to_entry_check_perm(const char *key, uint32_t domid, uint32_t perms)
 {
 	struct xs_entry *entry = key_to_entry(key);
 
-	if (entry && check_perms(entry, perms, domid)) {
+	if (check_perms_for_entry(entry, domid, perms)) {
 		return entry;
 	}
 
@@ -521,10 +530,19 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 	}
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry_check_perm(path, xenstore->domain->domid, XS_PERM_READ);
+	entry = key_to_entry(path);
 	k_free(path);
+
 	if (!entry) {
-		goto out;
+		k_mutex_unlock(&xsel_mutex);
+		send_errno(xenstore, id, ENOENT);
+		return;
+	}
+
+	if (!check_perms_for_entry(entry, xenstore->domain->domid, XS_PERM_READ)) {
+		k_mutex_unlock(&xsel_mutex);
+		send_errno(xenstore, id, EACCES);
+		return;
 	}
 
 	/* Calculate total length of dirs child node names */
@@ -547,7 +565,6 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 		reply_sz += dir_name_len;
 	}
 
-out:
 	k_mutex_unlock(&xsel_mutex);
 	send_reply_sz(xenstore, id, XS_DIRECTORY, dir_list, reply_sz);
 	k_free(dir_list);
