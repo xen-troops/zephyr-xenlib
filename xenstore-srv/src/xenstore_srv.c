@@ -2014,9 +2014,14 @@ int stop_domain_stored(struct xen_domain *domain)
 static int xs_init_root(const struct device *d)
 {
 	ARG_UNUSED(d);
+	struct xs_permissions permissions = {
+		.domid = 0,
+		.perms = XS_PERM_NONE,
+	};
 
 	sys_dlist_init(&root_xenstore.child_list);
 	sys_dnode_init(&root_xenstore.node);
+	set_perms_by_array(&root_xenstore, &permissions, 1);
 
 	return 0;
 }
