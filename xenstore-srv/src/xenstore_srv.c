@@ -598,6 +598,10 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 			continue;
 		}
 
+		if (domain->xenstore.used_out_bufs > XENSTORE_MAX_OUT_BUF_NUM - 1) {
+			return -ENOMEM;
+		}
+
 		token_len = strlen(iter->token);
 		payload_len = token_len + 1;
 
