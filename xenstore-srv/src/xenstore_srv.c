@@ -1886,7 +1886,7 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 			handle_input(xenstore);
 		}
 
-		if (can_write(xenstore)) {
+		while (can_write(xenstore)) {
 			handle_output(xenstore);
 		}
 	}
