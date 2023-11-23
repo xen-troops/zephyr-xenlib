@@ -19,6 +19,7 @@
 #define VUART_PFN_OFFSET 3
 #define DOM0_NAME "Domain-0"
 #define CONTAINER_NAME_SIZE 64
+#define INIT_XENSTORE_BUFF_SIZE 80
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,35 @@ typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
  * @return 0 on success, negative errno on error
  */
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
+
+struct pv_net_configuration {
+	bool configured;
+	int backend_domain_id;
+	char script[INIT_XENSTORE_BUFF_SIZE];
+	char mac[INIT_XENSTORE_BUFF_SIZE];
+	char bridge[INIT_XENSTORE_BUFF_SIZE];
+	char type[INIT_XENSTORE_BUFF_SIZE];
+	char ip[INIT_XENSTORE_BUFF_SIZE];
+};
+
+struct pv_block_configuration {
+	bool configured;
+	int backend_domain_id;
+	char backendtype[INIT_XENSTORE_BUFF_SIZE];
+	char format[INIT_XENSTORE_BUFF_SIZE];
+	char script[INIT_XENSTORE_BUFF_SIZE];
+	char target[INIT_XENSTORE_BUFF_SIZE];
+	char vdev[INIT_XENSTORE_BUFF_SIZE];
+	char access[INIT_XENSTORE_BUFF_SIZE];
+};
+
+#define MAX_PV_NET_DEVICES 3
+#define MAX_PV_BLOCK_DEVICES 3
+
+struct backend_configuration {
+	struct pv_net_configuration vifs[MAX_PV_NET_DEVICES];
+	struct pv_block_configuration disks[MAX_PV_BLOCK_DEVICES];
+};
 
 struct xen_domain_cfg {
 	char name[CONTAINER_NAME_SIZE];
@@ -88,6 +118,8 @@ struct xen_domain_cfg {
 	get_image_size_t get_image_size;
 
 	void *image_info;
+
+	struct backend_configuration back_cfg;
 };
 
 struct xen_domain_console {
