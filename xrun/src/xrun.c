@@ -563,8 +563,6 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 		goto err_config;
 	}
 
-	k_free(config);
-
 	container->bundle = bundle;
 	container->status = RUNNING;
 
@@ -586,17 +584,18 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	ret = fill_domcfg(&domcfg, &spec, container);
 	if (ret) {
 		k_mutex_unlock(&container_run_lock);
-		goto err;
+		goto err_config;
 	}
 
 	ret = domain_create(&domcfg, container->domid);
 	if (ret) {
 		k_mutex_unlock(&container_run_lock);
-		goto err;
+		goto err_config;
 	}
 
 	ret = domain_unpause(container->domid);
 
+	k_free(config);
 	k_free(domcfg.cmdline);
 	k_mutex_unlock(&container_run_lock);
 
