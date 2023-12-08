@@ -113,7 +113,7 @@ static int fdt_property_interrupts(void *fdt, gic_interrupt *intr,
 	return 0;
 }
 
-static int create_root(int major, int minor, void *fdt)
+static int create_root(int major, int minor, void *fdt, struct xen_domain_cfg *domcfg)
 {
 	int res;
 	char buf[FDT_STRING_MAX];
@@ -130,7 +130,13 @@ static int create_root(int major, int minor, void *fdt)
 	if (!res)
 		return -ENOMEM;
 
-	res = fdt_property_compat(fdt, 2, buf, "xen,xenvm");
+	/* Check if custom machine compatible is not empty and use it */
+	if (domcfg->machine_dt_compat) {
+		res = fdt_property_compat(fdt, 2, buf, domcfg->machine_dt_compat);
+	} else {
+		/* Or left default if custom is NULL */
+		res = fdt_property_compat(fdt, 2, buf, "xen,xenvm");
+	}
 	if (res)
 		return res;
 
@@ -839,7 +845,7 @@ int gen_domain_fdt(struct xen_domain_cfg *domcfg, void **fdtaddr,
 		goto err;
 	}
 
-	rc = create_root(xen_major, xen_minor, fdt);
+	rc = create_root(xen_major, xen_minor, fdt, domcfg);
 	if (rc < 0) {
 		goto err;
 	}
