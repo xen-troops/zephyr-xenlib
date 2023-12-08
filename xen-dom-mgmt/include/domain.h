@@ -54,6 +54,7 @@ typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
 struct xen_domain_cfg {
 	char name[CONTAINER_NAME_SIZE];
+	char *machine_dt_compat;
 	uint64_t mem_kb;
 
 	uint32_t flags;
