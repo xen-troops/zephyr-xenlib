@@ -1244,7 +1244,9 @@ static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device
 	}
 #endif
 	dom0cfg = k_malloc(sizeof(struct xen_domain_cfg));
+	memset(dom0cfg, 0, sizeof(*dom0cfg));
 	dom0 = k_malloc(sizeof(struct xen_domain));
+	memset(dom0, 0, sizeof(*dom0));
 	if (!dom0cfg || !dom0) {
 		ret = -ENOMEM;
 		LOG_ERR("Can't allocate memory (line=%d)", __LINE__);
