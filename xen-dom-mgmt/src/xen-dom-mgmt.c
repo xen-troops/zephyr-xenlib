@@ -852,6 +852,52 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 	return 0;
 }
 
+static int remove_xenstore_backends(int domid)
+{
+	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
+	static const char basepref[] = "/local/domain";
+	int rc = 0, i;
+	struct xen_domain *domain = NULL;
+
+	domain = domid_to_domain(domid);
+
+	for (i = 0; i < MAX_PV_NET_DEVICES; i++) {
+		if (domain->back_state.vifs[i].functional) {
+			/*
+			 * Removing whole backend/vif/domainid node, if we have
+			 * at least one fucntional vif backend.
+			 */
+			sprintf(lbuffer, "%s/%d/backend/vif/%d", basepref,
+				domain->back_state.vifs[i].backend_domain_id, domid);
+			rc = xss_rm(lbuffer);
+			if (rc) {
+				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);
+			}
+			break;
+		}
+	}
+
+	for (i = 0; i < MAX_PV_BLOCK_DEVICES; i++) {
+		if (domain->back_state.disks[i].functional) {
+			/*
+			 * Removing whole backend/vbd/domainid node, if we have
+			 * at least one fucntional vbd backend.
+			 */
+			sprintf(lbuffer, "%s/%d/backend/vbd/%d", basepref,
+				domain->back_state.disks[i].backend_domain_id, domid);
+			rc = xss_rm(lbuffer);
+			if (rc) {
+				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);
+			}
+			break;
+		}
+	}
+
+	memset(&domain->back_state, 0, sizeof(domain->back_state));
+
+	return rc;
+}
+
 static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid, int instance_id)
 {
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
@@ -1396,6 +1442,12 @@ int domain_destroy(uint32_t domid)
 		return -EINVAL;
 	}
 
+	rc = remove_xenstore_backends(domid);
+	if (rc) {
+		LOG_ERR("Failed to remove_xenstore_backends domain#%u (rc=%d)", domain->domid, rc);
+		err = rc;
+	}
+
 	rc = stop_domain_stored(domain);
 	if (rc) {
 		LOG_ERR("Failed to stop domain#%u store (rc=%d)", domain->domid, rc);
@@ -1462,26 +1514,37 @@ int domain_unpause(uint32_t domid)
 int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
 {
 	int rc, i;
+	struct xen_domain *domain = NULL;
+	struct backends_state *bs = NULL;
+	const struct backend_configuration *bc = NULL;
+
+	domain = domid_to_domain(domid);
+	bs = &domain->back_state;
+	bc = &domcfg->back_cfg;
 
 	for (i = 0; i < MAX_PV_BLOCK_DEVICES; i++) {
-		if (domcfg->back_cfg.disks[i].configured) {
-			rc = add_pvblock_xenstore(&domcfg->back_cfg.disks[i], domid);
+		if (bc->disks[i].configured) {
+			rc = add_pvblock_xenstore(&bc->disks[i], domid);
 			if (rc) {
 				LOG_ERR("Failed to initialize pvblock for domid#%u (rc=%d)",
 					domid, rc);
 				goto deinit;
 			}
+			bs->disks[i].functional = true;
+			bs->disks[i].backend_domain_id = bc->disks[i].backend_domain_id;
 		}
 	}
 
 	for (i = 0; i < MAX_PV_NET_DEVICES; i++) {
-		if (domcfg->back_cfg.vifs[i].configured) {
-			rc = add_pvnet_xenstore(&domcfg->back_cfg.vifs[i], domid, i);
+		if (bc->vifs[i].configured) {
+			rc = add_pvnet_xenstore(&bc->vifs[i], domid, i);
 			if (rc) {
 				LOG_ERR("Failed to initialize pvnet for domid#%u (rc=%d)",
 					domid, rc);
 				goto deinit;
 			}
+			bs->vifs[i].functional = true;
+			bs->vifs[i].backend_domain_id = bc->vifs[i].backend_domain_id;
 		}
 	}
 

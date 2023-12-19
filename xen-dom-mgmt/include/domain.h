@@ -82,6 +82,16 @@ struct backend_configuration {
 	struct pv_block_configuration disks[MAX_PV_BLOCK_DEVICES];
 };
 
+struct backend_state {
+	bool functional;
+	int backend_domain_id;
+};
+
+struct backends_state {
+	struct backend_state vifs[MAX_PV_NET_DEVICES];
+	struct backend_state disks[MAX_PV_BLOCK_DEVICES];
+};
+
 struct xen_domain_cfg {
 	char name[CONTAINER_NAME_SIZE];
 	char *machine_dt_compat;
@@ -157,6 +167,7 @@ struct xen_domain {
 
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
+	struct backends_state back_state;
 };
 
 struct xen_domain *domid_to_domain(uint32_t domid);
