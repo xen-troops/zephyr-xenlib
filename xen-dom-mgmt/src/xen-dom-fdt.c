@@ -771,7 +771,7 @@ static int copy_pfdt(void *fdt, void *pfdt)
 	int r;
 
 	r = copy_node_by_path("/passthrough", fdt, pfdt);
-	if (r < 0) {
+	if (r < 0 && r != -FDT_ERR_NOTFOUND) {
 		LOG_ERR("Can't copy the node \"/passthrough\"");
 		return r;
 	}
