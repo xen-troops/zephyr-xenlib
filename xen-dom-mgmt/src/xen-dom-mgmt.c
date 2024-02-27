@@ -204,7 +204,7 @@ static int prepare_domain_physmap(int domid, uint64_t base_pfn, struct xen_domai
 	int rc;
 	uint64_t populated_gfn;
 	uint64_t nr_mem_exts =
-		ceiling_fraction(cfg->mem_kb * 1024, PFN_2M_SIZE);
+		DIV_ROUND_UP(cfg->mem_kb * 1024, PFN_2M_SIZE);
 
 	rc = allocate_magic_pages(domid);
 	if (rc) {
@@ -304,7 +304,7 @@ static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
 	void *mapped_dtb_addr;
 	int rc, err_cache_flush = 0;
 	uint64_t dtb_size = dtb_end - dtb_start;
-	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
+	uint64_t nr_pages = DIV_ROUND_UP(dtb_size, XEN_PAGE_SIZE);
 	uint64_t dtb_pfn;
 
 	rc = xenmem_map_region(domid, nr_pages,
@@ -387,7 +387,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 		return rc;
 	}
 
-	nr_pages = ceiling_fraction(domain_size, XEN_PAGE_SIZE);
+	nr_pages = DIV_ROUND_UP(domain_size, XEN_PAGE_SIZE);
 	LOG_DBG("zImage header info: text_offset = %llx, base_addr = %llx, pages = %llu size = %llu",
 		zhdr.text_offset, base_addr, nr_pages,
 		nr_pages * XEN_PAGE_SIZE);
