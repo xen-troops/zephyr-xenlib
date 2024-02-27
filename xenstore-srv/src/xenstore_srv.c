@@ -13,6 +13,7 @@
 #include <zephyr/xen/public/hvm/params.h>
 #include <zephyr/xen/hvm.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/barrier.h>
 
 #include <mem-mgmt.h>
 #include "domain.h"
@@ -356,7 +357,7 @@ static int ring_write(struct xenstore *xenstore, const void *data, size_t len)
 
 	cons = intf->rsp_cons;
 	prod = intf->rsp_prod;
-	dmb();
+	z_barrier_dmem_fence_full();
 
 	if (check_indexes(cons, prod)) {
 		return -EINVAL;
@@ -368,7 +369,7 @@ static int ring_write(struct xenstore *xenstore, const void *data, size_t len)
 	}
 
 	memcpy(dest, data, len);
-	dmb();
+	z_barrier_dmem_fence_full();
 	intf->rsp_prod += len;
 
 	notify_evtchn(xenstore->local_evtchn);
@@ -1792,7 +1793,7 @@ static int ring_read(struct xenstore *xenstore, void *data, size_t len)
 
 	cons = intf->req_cons;
 	prod = intf->req_prod;
-	dmb();
+	z_barrier_dmem_fence_full();
 
 	if (check_indexes(cons, prod)) {
 		return -EIO;
@@ -1804,7 +1805,7 @@ static int ring_read(struct xenstore *xenstore, void *data, size_t len)
 	}
 
 	memcpy(data, src, len);
-	dmb();
+	z_barrier_dmem_fence_full();
 	intf->req_cons += len;
 
 	notify_evtchn(xenstore->local_evtchn);
