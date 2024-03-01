@@ -9,6 +9,7 @@
 #include <zephyr/xen/public/memory.h>
 #include <zephyr/xen/public/xen.h>
 #include <zephyr/xen/hvm.h>
+#include <zephyr/sys/barrier.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
@@ -112,7 +113,7 @@ static void write_to_ext_ring(struct xencons_interface *intf,
 	XENCONS_RING_IDX idx = 0;
 	size_t free_space;
 
-	__DSB();		/* Read counters, then write data */
+	z_barrier_dsync_fence_full();		/* Read counters, then write data */
 	if ((prod - cons) > sizeof(intf->in)) {
 		LOG_WRN("Invalid state of console input ring. Resetting.");
 		intf->in_prod = cons;
@@ -132,7 +133,7 @@ static void write_to_ext_ring(struct xencons_interface *intf,
 		len--;
 	}
 
-	__DSB();		/* Write data, then update counter */
+	z_barrier_dsync_fence_full();		/* Write data, then update counter */
 	intf->in_prod = prod;
 }
 
@@ -149,7 +150,7 @@ static int read_from_ext_ring(struct xencons_interface *intf,
 	XENCONS_RING_IDX prod = intf->out_prod;
 	XENCONS_RING_IDX out_idx = 0;
 
-	__DSB();		/* Read counters, then data */
+	z_barrier_dsync_fence_full();		/* Read counters, then data */
 	if ((prod - cons) > sizeof(intf->out)) {
 		LOG_WRN("Invalid state of console output ring. Resetting.");
 		intf->out_cons = prod;
@@ -163,7 +164,7 @@ static int read_from_ext_ring(struct xencons_interface *intf,
 		cons++;
 	}
 
-	__DSB();		/* Read data then update counter */
+	z_barrier_dsync_fence_full();		/* Read data then update counter */
 	intf->out_cons = cons;
 
 	return recv;
