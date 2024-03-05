@@ -1095,7 +1095,7 @@ static int initialize_xenstore(uint32_t domid,
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char rbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	char uuid[INIT_XENSTORE_UUID_BUF_SIZE];
-	int rc;
+	int i, rc;
 	static const char basepref[] = "/local/domain";
 	static const char * const rw_dirs[] = { "data",
 			 "drivers",
@@ -1113,7 +1113,7 @@ static int initialize_xenstore(uint32_t domid,
 	// TODO: generate properly
 	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
 
-	for (int i = 0; i < domcfg->max_vcpus; ++i) {
+	for (i = 0; i < domcfg->max_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
 		rc = xss_write_guest_domain_ro(lbuffer, "online", domid);
 		if (rc) {
