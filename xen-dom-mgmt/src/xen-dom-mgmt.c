@@ -758,12 +758,6 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 		return rc;
 	}
 
-	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/state", basepref, backendid, domid, vbd_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
-	if (rc) {
-		return rc;
-	}
-
 	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/dev", basepref, backendid, domid, vbd_id);
 	rc = xss_write_guest_with_permissions(lbuffer, cfg->vdev, backendid, domid);
 	if (rc) {
@@ -802,6 +796,12 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 		return rc;
 	}
 
+	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/state", basepref, backendid, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
 	/* Guest domain part */
 
 	sprintf(lbuffer, "%s/%d/device/vbd/%d", basepref, domid, vbd_id);
@@ -824,12 +824,6 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 		return rc;
 	}
 
-	sprintf(lbuffer, "%s/%d/device/vbd/%d/state", basepref, domid, vbd_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
-	if (rc) {
-		return rc;
-	}
-
 	sprintf(lbuffer, "%s/%d/device/vbd/%d/virtual-device", basepref, domid, vbd_id);
 	sprintf(rbuffer, "%d", vbd_id);
 	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
@@ -845,6 +839,12 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 
 	sprintf(lbuffer, "%s/%d/device/vbd/%d/event-channel", basepref, domid, vbd_id);
 	rc = xss_write_guest_with_permissions(lbuffer, "", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vbd/%d/state", basepref, domid, vbd_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
 	if (rc) {
 		return rc;
 	}
@@ -946,13 +946,6 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 		return rc;
 	}
 
-	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/state", basepref,
-			backendid, domid, instance_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
-	if (rc) {
-		return rc;
-	}
-
 	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/online", basepref, backendid, domid, instance_id);
 	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
 	if (rc) {
@@ -1006,6 +999,12 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 		}
 	}
 
+	sprintf(lbuffer, "%s/%d/backend/vif/%d/%d/state", basepref, backendid, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", backendid, domid);
+	if (rc) {
+		return rc;
+	}
+
 	/* VIF domain part */
 
 	sprintf(lbuffer, "%s/%d/device/vif", basepref, domid);
@@ -1030,12 +1029,6 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 	sprintf(lbuffer, "%s/%d/device/vif/%d/backend-id", basepref, domid, instance_id);
 	sprintf(rbuffer, "%d", backendid);
 	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
-	if (rc) {
-		return rc;
-	}
-
-	sprintf(lbuffer, "%s/%d/device/vif/%d/state", basepref, domid, instance_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
 	if (rc) {
 		return rc;
 	}
@@ -1067,6 +1060,12 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 	}
 
 	sprintf(lbuffer, "%s/%d/device/vif/%d/request-rx-copy", basepref, domid, instance_id);
+	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
+	if (rc) {
+		return rc;
+	}
+
+	sprintf(lbuffer, "%s/%d/device/vif/%d/state", basepref, domid, instance_id);
 	rc = xss_write_guest_with_permissions(lbuffer, "1", domid, backendid);
 
 	return rc;
