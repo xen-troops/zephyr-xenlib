@@ -34,6 +34,7 @@ uint32_t parse_domid(size_t argc, char **argv)
 
 static int domu_create(const struct shell *shell, int argc, char **argv)
 {
+	int ret;
 	uint32_t domid;
 
 	if (argc != 3)
@@ -48,7 +49,12 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 	 * TODO: this should be changed in app code.
 	 * Not all domains using domd config
 	 */
-	return domain_create(&domd_cfg, domid);
+	ret = domain_create(&domd_cfg, domid);
+	if (ret) {
+		return ret; /* domain_create should care about error logs */
+	}
+
+	return domain_post_create(&domd_cfg, domid);
 }
 
 int domu_destroy(const struct shell *shell, size_t argc, char **argv)
