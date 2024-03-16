@@ -94,6 +94,8 @@ struct message_handle {
 static void free_node(struct xs_entry *entry);
 static void send_errno(struct xenstore *xenstore, uint32_t id, int err);
 
+static void cleanup_domain_watches(struct xen_domain *domain);
+
 /* Allocate one stack for external reader thread */
 static int get_stack_idx(void)
 {
@@ -1405,14 +1407,7 @@ static void remove_watch_entry(struct watch_entry *entry)
 static void handle_reset_watches(struct xenstore *xenstore, uint32_t id,
 				 char *payload, uint32_t len)
 {
-	struct watch_entry *iter, *next;
-
-	k_mutex_lock(&wel_mutex, K_FOREVER);
-	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&watch_entry_list, iter, next, node) {
-		remove_watch_entry(iter);
-	}
-	k_mutex_unlock(&wel_mutex);
-
+	cleanup_domain_watches(xenstore->domain);
 	send_reply(xenstore, id, XS_RESET_WATCHES, "OK");
 }
 
