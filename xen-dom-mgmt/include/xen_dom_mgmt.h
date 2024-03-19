@@ -19,6 +19,8 @@ int domain_pause(uint32_t domid);
 int domain_unpause(uint32_t domid);
 int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid);
 
+int find_cfg_and_create_domu(uint32_t domid);
+
 #ifdef __cplusplus
 }
 #endif

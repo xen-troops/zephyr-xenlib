@@ -45,10 +45,11 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 		LOG_ERR("Invalid domid passed to create cmd");
 		return -EINVAL;
 	}
-	/*
-	 * TODO: this should be changed in app code.
-	 * Not all domains using domd config
-	 */
+
+	if (domid != 1) {
+		return find_cfg_and_create_domu(domid);
+	}
+
 	ret = domain_create(&domd_cfg, domid);
 	if (ret) {
 		return ret; /* domain_create should care about error logs */
