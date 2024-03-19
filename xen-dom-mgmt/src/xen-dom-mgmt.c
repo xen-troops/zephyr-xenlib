@@ -771,7 +771,17 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 	}
 
 	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/mode", basepref, backendid, domid, vbd_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "w", backendid, domid);
+
+	if (!strcmp("rw", cfg->access) || !strcmp("w", cfg->access)) {
+		rc = xss_write_guest_with_permissions(lbuffer, "w", backendid, domid);
+	} else if (!strcmp("ro", cfg->access) || !strcmp("r", cfg->access)) {
+		rc = xss_write_guest_with_permissions(lbuffer, "r", backendid, domid);
+	} else {
+		LOG_ERR("Incorrect format of access field (%s). vdev %s target %s",
+			cfg->access, cfg->vdev, cfg->target);
+		return -EINVAL;
+	}
+
 	if (rc) {
 		return rc;
 	}
@@ -811,7 +821,7 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 	}
 
 	sprintf(lbuffer, "%s/%d/device/vbd/%d/backend", basepref, domid, vbd_id);
-	sprintf(rbuffer, "%s/1/backend/vbd/%d/%d", basepref, domid, vbd_id);
+	sprintf(rbuffer, "%s/%d/backend/vbd/%d/%d", basepref, backendid, domid, vbd_id);
 	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
 	if (rc) {
 		return rc;
@@ -1038,6 +1048,13 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
 	if (rc) {
 		return rc;
+	}
+
+	/* TODO: generate MAC if not present */
+	if (cfg->mac[0] == '\0') {
+		LOG_ERR("There isn't valid MAC for network interface! domid %u backendid %u ",
+			domid, backendid);
+		return -EINVAL;
 	}
 
 	sprintf(lbuffer, "%s/%d/device/vif/%d/mac", basepref, domid, instance_id);
