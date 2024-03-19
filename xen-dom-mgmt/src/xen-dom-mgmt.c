@@ -771,7 +771,17 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 	}
 
 	sprintf(lbuffer, "%s/%d/backend/vbd/%d/%d/mode", basepref, backendid, domid, vbd_id);
-	rc = xss_write_guest_with_permissions(lbuffer, "w", backendid, domid);
+
+	if (!strcmp("rw", cfg->access) || !strcmp("w", cfg->access)) {
+		rc = xss_write_guest_with_permissions(lbuffer, "w", backendid, domid);
+	} else if (!strcmp("ro", cfg->access) || !strcmp("r", cfg->access)) {
+		rc = xss_write_guest_with_permissions(lbuffer, "r", backendid, domid);
+	} else {
+		LOG_ERR("Incorrect format of access field (%s). vdev %s target %s",
+			cfg->access, cfg->vdev, cfg->target);
+		return -EINVAL;
+	}
+
 	if (rc) {
 		return rc;
 	}
