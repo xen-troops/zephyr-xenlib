@@ -821,7 +821,7 @@ static int add_pvblock_xenstore(const struct pv_block_configuration *cfg, int do
 	}
 
 	sprintf(lbuffer, "%s/%d/device/vbd/%d/backend", basepref, domid, vbd_id);
-	sprintf(rbuffer, "%s/1/backend/vbd/%d/%d", basepref, domid, vbd_id);
+	sprintf(rbuffer, "%s/%d/backend/vbd/%d/%d", basepref, backendid, domid, vbd_id);
 	rc = xss_write_guest_with_permissions(lbuffer, rbuffer, domid, backendid);
 	if (rc) {
 		return rc;
