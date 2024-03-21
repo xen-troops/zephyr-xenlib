@@ -1089,7 +1089,6 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 }
 
 static int initialize_xenstore(uint32_t domid,
-			       const struct xen_domain_cfg *domcfg,
 			       const struct xen_domain *domain)
 {
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
@@ -1113,7 +1112,7 @@ static int initialize_xenstore(uint32_t domid,
 	// TODO: generate properly
 	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
 
-	for (i = 0; i < domcfg->max_vcpus; ++i) {
+	for (i = 0; i < domain->num_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
 		rc = xss_write_guest_domain_ro(lbuffer, "online", domid);
 		if (rc) {
@@ -1237,7 +1236,6 @@ deinit:
 static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
 {
 	int ret = 0;
-	struct xen_domain_cfg *dom0cfg = NULL;
 	struct xen_domain *dom0 = NULL;
 #ifdef CONFIG_XSTAT
 	struct xenstat_domain *dom0stat = NULL;
@@ -1259,33 +1257,27 @@ static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device
 		goto out;
 	}
 #endif
-	dom0cfg = k_malloc(sizeof(struct xen_domain_cfg));
-	memset(dom0cfg, 0, sizeof(*dom0cfg));
 	dom0 = k_malloc(sizeof(struct xen_domain));
 	memset(dom0, 0, sizeof(*dom0));
-	if (!dom0cfg || !dom0) {
+	if (!dom0) {
 		ret = -ENOMEM;
-		LOG_ERR("Can't allocate memory (line=%d)", __LINE__);
+		LOG_ERR("Can't allocate memory for dom0 domain struct");
 		goto out;
 	}
-	snprintf(dom0cfg->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
 	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
 #ifdef CONFIG_XSTAT
-	dom0cfg->max_vcpus = dom0stat->num_vcpus;
-	dom0cfg->mem_kb = dom0stat->cur_mem / 1024;
+	dom0->num_vcpus = dom0stat->num_vcpus;
 	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
 #else
-	dom0cfg->max_vcpus = 0;
-	dom0cfg->mem_kb = 0;
+	dom0->num_vcpus = 0;
 	dom0->max_mem_kb = 0;
 #endif
 	xss_write("/tool/xenstored", "");
-	ret = initialize_xenstore(0, dom0cfg, dom0);
+	ret = initialize_xenstore(0, dom0);
 out:
 #ifdef CONFIG_XSTAT
 	k_free(dom0stat);
 #endif
-	k_free(dom0cfg);
 	k_free(dom0);
 	return ret;
 }
@@ -1411,7 +1403,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 #endif
 
-	rc = initialize_xenstore(domid, domcfg, domain);
+	rc = initialize_xenstore(domid, domain);
 	if (rc) {
 		goto stop_domain_console;
 	}
