@@ -56,6 +56,22 @@ int domain_unpause(uint32_t domid);
  */
 int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid);
 
+/**
+ * Find the configuration for a Xen domain by name.
+ *
+ * @param name The name of the Xen domain to search for.
+ * @return A pointer to the Xen domain configuration if found, NULL otherwise.
+ */
+struct xen_domain_cfg *domain_find_config(const char *name);
+
+#ifdef CONFIG_XEN_DOMCFG_SECTION
+#define DECL_CONFIG static __section(".domain_configs") __used
+extern struct xen_domain_cfg _domain_configs_start[];
+extern struct xen_domain_cfg _domain_configs_end[];
+#else
+#define DECL_CONFIG
+#endif
+
 #ifdef __cplusplus
 }
 #endif
