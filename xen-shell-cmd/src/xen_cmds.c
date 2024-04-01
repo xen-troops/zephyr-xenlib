@@ -7,6 +7,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <xen_dom_mgmt.h>
 #ifdef CONFIG_XEN_CONSOLE_SRV
@@ -14,8 +15,6 @@
 #endif
 
 LOG_MODULE_REGISTER(xen_shell);
-
-extern struct xen_domain_cfg domd_cfg;
 
 uint32_t parse_domid(size_t argc, char **argv)
 {
@@ -37,25 +36,33 @@ uint32_t parse_domid(size_t argc, char **argv)
 static int domu_create(const struct shell *shell, int argc, char **argv)
 {
 	int ret;
-	uint32_t domid = 0;
+	uint32_t domid;
+	char *name;
+	struct xen_domain_cfg *cfg;
 
-	if (argc > 2) {
-		domid = parse_domid(argc, argv);
-		if (!domid) {
-			LOG_ERR("Invalid domid passed to create cmd");
-			return -EINVAL;
-		}
+	if (argc < 2)
+		return -EINVAL;
+
+	domid = parse_domid(argc, argv);
+
+	name = argv[1];
+	if (!name) {
+		shell_error(shell, "Invalid config passed to create cmd");
+		return -EINVAL;
 	}
-	/*
-	 * TODO: this should be changed in app code.
-	 * Not all domains using domd config
-	 */
-	ret = domain_create(&domd_cfg, domid);
+
+	cfg = domain_find_config(name);
+	if (!cfg) {
+		shell_error(shell, "Config %s not found", name);
+		return -EINVAL;
+	}
+
+	ret = domain_create(cfg, domid);
 	if (ret) {
 		return ret; /* domain_create should care about error logs */
 	}
 
-	return domain_post_create(&domd_cfg, domid);
+	return domain_post_create(cfg, domid);
 }
 
 int domu_destroy(const struct shell *shell, size_t argc, char **argv)
@@ -136,8 +143,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
 	SHELL_CMD_ARG(create, NULL,
 		      " Create Xen domain\n"
-		      " Usage: create [-d <domid>]\n",
-		      domu_create, 1, 2),
+		      " Usage: create cfg_name [-d <domid>]\n",
+		      domu_create, 2, 2),
 	SHELL_CMD_ARG(destroy, NULL,
 		      " Destroy Xen domain\n"
 		      " Usage: destroy <domid>\n",

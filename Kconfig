@@ -30,6 +30,16 @@ config XEN_DOMAIN_MANAGEMENT
 	  Enable domain management library. This library allows you
 	  to create, destroy and manage xen domains.
 
+config XEN_DOMCFG_SECTION
+	bool "Enable Xen domain config section"
+	default y
+	depends on XEN_DOMAIN_MANAGEMENT
+	help
+	  Enable gathering domain configurations to a common section.
+	  This allows you to declare multiple domain configs with
+	  a DECL_CONFIG macro. Configs can be later accessed by
+	  their name.
+
 config XEN_CONSOLE_SRV
 	bool "Enable Xen Console server"
 	help

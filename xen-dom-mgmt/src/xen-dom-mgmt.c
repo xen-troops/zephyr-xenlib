@@ -28,6 +28,7 @@
 #include <domain.h>
 #include <xen-dom-fdt.h>
 #include <xen-dom-xs.h>
+#include <xen_dom_mgmt.h>
 #include <mem-mgmt.h>
 #include <uimage.h>
 #include <zimage.h>
@@ -612,6 +613,21 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 			return iter;
 		}
 	}
+
+	return NULL;
+}
+
+struct xen_domain_cfg *domain_find_config(const char *name)
+{
+	__maybe_unused struct xen_domain_cfg *cfg = NULL;
+
+#ifdef CONFIG_XEN_DOMCFG_SECTION
+	for (cfg = _domain_configs_start; cfg < _domain_configs_end; cfg++) {
+		if (strncmp(cfg->name, name, CONTAINER_NAME_SIZE) == 0) {
+			return cfg;
+		}
+	}
+#endif
 
 	return NULL;
 }
