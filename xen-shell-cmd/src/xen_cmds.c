@@ -139,6 +139,28 @@ int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 	return domain_unpause(domid);
 }
 
+int xen_config_list(const struct shell *shell, size_t argc, char **argv)
+{
+	__maybe_unused struct xen_domain_cfg *cfg;
+	int i;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	for (i = 0; i < domain_get_user_cfg_count(); i++) {
+		cfg = domain_get_user_cfg(i);
+		shell_print(shell, "%s", cfg->name);
+	}
+
+#ifdef CONFIG_XEN_DOMCFG_SECTION
+	for (cfg = _domain_configs_start; cfg < _domain_configs_end; cfg++) {
+		shell_print(shell, "%s", cfg->name);
+	}
+#endif
+
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
 	SHELL_CMD_ARG(create, NULL,
@@ -157,6 +179,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      " Unpause Xen domain\n"
 		      " Usage: unpause <domid>\n",
 		      domu_unpause, 2, 0),
+	SHELL_CMD_ARG(config_list, NULL,
+		      " List available domain configurations\n",
+		      xen_config_list, 1, 0),
 #ifdef CONFIG_XEN_CONSOLE_SRV
 	SHELL_CMD_ARG(console, NULL,
 		      " Attach to a domain console.\n"
