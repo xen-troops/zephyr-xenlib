@@ -1050,6 +1050,13 @@ static int add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid,
 		return rc;
 	}
 
+	/* TODO: generate MAC if not present */
+	if (cfg->mac[0] == '\0') {
+		LOG_ERR("There isn't valid MAC for network interface! domid %u backendid %u ",
+			domid, backendid);
+		return -EINVAL;
+	}
+
 	sprintf(lbuffer, "%s/%d/device/vif/%d/mac", basepref, domid, instance_id);
 	rc = xss_write_guest_with_permissions(lbuffer, cfg->mac, domid, backendid);
 	if (rc) {
