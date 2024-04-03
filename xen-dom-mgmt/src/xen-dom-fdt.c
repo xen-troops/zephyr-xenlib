@@ -25,7 +25,7 @@ LOG_MODULE_DECLARE(xen_dom_mgmt);
 #define GUEST_GIC_PHANDLE (65000)
 #define GUEST_ROOT_ADDRESS_CELLS 2
 #define GUEST_ROOT_SIZE_CELLS 2
-#define FDT_STRING_MAX 50
+#define FDT_STRING_MAX 128
 #define DT_IRQ_TYPE_LEVEL_LOW 0x00000008
 
 #define ALIGN_UP_TO_2MB(x) (((x) + MB(2) - 1) & (~(MB(2) - 1)))
@@ -132,7 +132,23 @@ static int create_root(int major, int minor, void *fdt, struct xen_domain_cfg *d
 
 	/* Check if custom machine compatible is not empty and use it */
 	if (domcfg->machine_dt_compat) {
-		res = fdt_property_compat(fdt, 2, buf, domcfg->machine_dt_compat);
+		unsigned int i = 0;
+		size_t size = res + 1;
+
+		for (i = 0; i < domcfg->nr_machine_dt_compat; i++) {
+			size_t size_curr_compat = strlen(domcfg->machine_dt_compat[i]);
+
+			if (size + size_curr_compat + 1 > sizeof(buf)) {
+				LOG_WRN("Not all of the compatibles're written to DTB (%u/%u)",
+					i + 1, domcfg->nr_machine_dt_compat + 1);
+				return -ENOMEM;
+			}
+
+			memcpy(buf + size, domcfg->machine_dt_compat[i], size_curr_compat);
+			size += size_curr_compat + 1;
+		}
+
+		res = fdt_property(fdt, "compatible", buf, size);
 	} else {
 		/* Or left default if custom is NULL */
 		res = fdt_property_compat(fdt, 2, buf, "xen,xenvm");
