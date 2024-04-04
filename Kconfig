@@ -45,6 +45,13 @@ config XEN_SHELL
 	help
 	  Enable set of Xen shell commands for domain management.
 
+config XENSTORE_SHELL_READ_SIZE
+	int "Size of xs read buffer"
+	default 256
+	depends on XEN_SHELL
+	help
+	  Sets the maximum size that xs read cmd can handle
+
 config XRUN_SHELL_CMDS
 	bool "Enable XRUN shell commands"
 	help
