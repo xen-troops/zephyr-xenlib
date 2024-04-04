@@ -1132,6 +1132,57 @@ int xss_read_integer(const char *path, int *value)
 	return rc;
 }
 
+char **xss_list_entries(const char *path, int *len)
+{
+	char **dirs = NULL;
+	int i;
+	struct xs_entry *entry, *iter, *next;
+	sys_dlist_t *children = NULL;
+
+	*len = 0;
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		return NULL;
+	}
+
+	children = &entry->child_list;
+
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, iter, next, node) {
+		*len += 1;
+	}
+
+	dirs = k_malloc(*len * sizeof(char *));
+	if (!dirs) {
+		*len = 0;
+		k_mutex_unlock(&xsel_mutex);
+		return NULL;
+	}
+
+	i = 0;
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, iter, next, node) {
+		dirs[i] = k_malloc(strlen(iter->key) + 1);
+		if (!dirs[i]) {
+			*len = i;
+			k_mutex_unlock(&xsel_mutex);
+			goto err_free;
+		}
+		strcpy(dirs[i], iter->key);
+		i++;
+	}
+
+	k_mutex_unlock(&xsel_mutex);
+	return dirs;
+err_free:
+	for (i = 0; i < *len; i++) {
+		k_free(dirs[i]);
+	}
+	k_free(dirs);
+	*len = 0;
+	return NULL;
+}
+
 int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 {
 	int rc;
