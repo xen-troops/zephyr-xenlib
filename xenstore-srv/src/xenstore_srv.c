@@ -1109,7 +1109,11 @@ int xss_read(const char *path, char *value, size_t len)
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
 	if (entry) {
-		strncpy(value, entry->value, len);
+		if (entry->value) {
+			strncpy(value, entry->value, len);
+		} else {
+			strcpy(value, "");
+		}
 		rc = 0;
 	}
 
