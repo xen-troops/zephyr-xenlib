@@ -96,6 +96,15 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
  */
 int xss_rm(const char *path);
 
+/*
+ * List all entries in a directory.
+ *
+ * @param path Xenstore path
+ * @param len Number of entries in the directory
+ * @return Dynamically allocated array of dynamically allocated strings with directory entries
+ */
+char **xss_list_entries(const char *path, int *len);
+
 #ifdef __cplusplus
 }
 #endif
