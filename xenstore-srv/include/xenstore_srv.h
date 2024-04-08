@@ -45,6 +45,7 @@ struct xenstore {
 
 int start_domain_stored(struct xen_domain *domain);
 int stop_domain_stored(struct xen_domain *domain);
+int xs_init_root(void);
 
 #ifdef __cplusplus
 }

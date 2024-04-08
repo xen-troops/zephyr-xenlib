@@ -2112,9 +2112,8 @@ int stop_domain_stored(struct xen_domain *domain)
 	return err;
 }
 
-static int xs_init_root(const struct device *d)
+int xs_init_root(void)
 {
-	ARG_UNUSED(d);
 	struct xs_permissions permissions = {
 		.domid = 0,
 		.perms = XS_PERM_NONE,
@@ -2127,4 +2126,3 @@ static int xs_init_root(const struct device *d)
 	return 0;
 }
 
-SYS_INIT(xs_init_root, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
