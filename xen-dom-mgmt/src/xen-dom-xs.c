@@ -16,7 +16,6 @@
 #include <domain.h>
 #include <xen/public/io/xs_wire.h>
 #include <xss.h>
-#include <xstat.h>
 #include <xen-dom-xs.h>
 #include <xenstore_srv.h>
 
@@ -35,9 +34,6 @@ LOG_MODULE_REGISTER(xen_dom_xs);
 
 #define INIT_XENSTORE_BUFF_SIZE 80
 #define INIT_XENSTORE_UUID_BUF_SIZE 40
-
-#define DOM0_XENSTORE_PRIORITY 45
-BUILD_ASSERT(DOM0_XENSTORE_PRIORITY > CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 void xs_deinitialize_domain_xenstore(uint32_t domid)
 {
@@ -635,54 +631,3 @@ deinit:
 	LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)", domid, rc);
 	return rc;
 }
-
-static int initialize_dom0_xenstore(__attribute__ ((unused)) const struct device *dev)
-{
-	int ret = 0;
-	struct xen_domain *dom0 = NULL;
-#ifdef CONFIG_XSTAT
-	struct xenstat_domain *dom0stat = NULL;
-
-	dom0stat = k_malloc(sizeof(struct xenstat_domain));
-	if (!dom0stat) {
-		ret = -ENOMEM;
-		LOG_ERR("Can't allocate memory (line=%d)", __LINE__);
-		goto out;
-	}
-	ret = xstat_getdominfo(dom0stat, 0, 1);
-	if (ret < 0) {
-		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
-		goto out;
-	}
-	if (ret == 0) {
-		/* Theoretically impossible */
-		ret = -EINVAL;
-		goto out;
-	}
-#endif
-	dom0 = k_malloc(sizeof(struct xen_domain));
-	memset(dom0, 0, sizeof(*dom0));
-	if (!dom0) {
-		ret = -ENOMEM;
-		LOG_ERR("Can't allocate memory for dom0 domain struct");
-		goto out;
-	}
-	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
-#ifdef CONFIG_XSTAT
-	dom0->num_vcpus = dom0stat->num_vcpus;
-	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
-#else
-	dom0->num_vcpus = 0;
-	dom0->max_mem_kb = 0;
-#endif
-	xss_write("/tool/xenstored", "");
-	ret = xs_initialize_xenstore(0, dom0);
-out:
-#ifdef CONFIG_XSTAT
-	k_free(dom0stat);
-#endif
-	k_free(dom0);
-	return ret;
-}
-
-SYS_INIT(initialize_dom0_xenstore, APPLICATION, DOM0_XENSTORE_PRIORITY);

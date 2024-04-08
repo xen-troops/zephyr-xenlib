@@ -899,3 +899,64 @@ deinit:
 	domain_destroy(domid);
 	return rc;
 }
+
+static int init_domain0(const struct device *d)
+{
+	ARG_UNUSED(d);
+	int ret = 0;
+	struct xen_domain *dom0 = NULL;
+#ifdef CONFIG_XSTAT
+	struct xenstat_domain *dom0stat;
+
+	dom0stat = k_malloc(sizeof(*dom0stat));
+	if (!dom0stat) {
+		ret = -ENOMEM;
+		LOG_ERR("Can't allocate memory for dom0 xenstat");
+		goto out;
+	}
+
+	ret = xstat_getdominfo(dom0stat, 0, 1);
+	if (ret < 0) {
+		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
+		goto out;
+	} else if (ret == 0) {
+		/* Theoretically impossible */
+		ret = -EINVAL;
+		goto out;
+	}
+#endif
+
+	dom0 = k_malloc(sizeof(*dom0));
+	if (!dom0) {
+		ret = -ENOMEM;
+		LOG_ERR("Can't allocate memory for dom0 domain struct");
+		goto out;
+	}
+	memset(dom0, 0, sizeof(*dom0));
+
+	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
+	dom0->domid = 0;
+
+#ifdef CONFIG_XSTAT
+	dom0->num_vcpus = dom0stat->num_vcpus;
+	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
+	k_free(dom0stat);
+#else
+	dom0->num_vcpus = 0;
+	dom0->max_mem_kb = 0;
+#endif
+
+	xs_init_root();
+	xss_write("/tool/xenstored", "");
+	xs_initialize_xenstore(0, dom0);
+
+out:
+#ifdef CONFIG_XSTAT
+	k_free(dom0stat);
+#endif
+	k_free(dom0);
+
+	return ret;
+}
+
+SYS_INIT(init_domain0, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
