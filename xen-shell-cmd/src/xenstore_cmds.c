@@ -57,7 +57,7 @@ static int xs_ls(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	paths = xss_directory(argv[1], &len);
+	paths = xss_list_entries(argv[1], &len);
 
 	if (!paths) {
 		shell_error(shell, "Failed to list xenstore path %s", argv[1]);
