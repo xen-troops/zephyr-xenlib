@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+
+env:
+  sdk_version: ${{ vars.SDK_VERSION  || '0.16.5-1' }}
+  aos_revision: ${{ vars.AOS_REVISION || 'main' }}
+  zephyr_revision: ${{ vars.ZEPHYR_REVISION || 'wip_dom0-xt_qemu' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
+        project: [zephyr-dom0-xt, aos-core-zephyr]
+        exclude:
+          - target: qemu_cortex_a53
+            project: aos-core-zephyr
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install west pyelftools protobuf grpcio-tools
+          sudo apt-get install ninja-build protobuf-compiler gperf
+
+      - name: Cache Zephyr SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: ${{ runner.os }}-zephyr-sdk-${{ env.sdk_version }}
+
+      - name: Download Zephyr SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir sdk
+          cd sdk
+          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ env.sdk_version }}/zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+          tar xf zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+          rm zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+
+      - name: Install Zephyr SDK
+        run: |
+          cd sdk/zephyr-sdk-${{ env.sdk_version }}
+          yes | ./setup.sh
+
+      - name: Clone zephyr-dom0-xt
+        uses: actions/checkout@v4
+        if: matrix.project == 'zephyr-dom0-xt'
+        with:
+          repository: xen-troops/zephyr-dom0-xt
+          ref: ${{ env.zephyr_revision }}
+          path: zephyr-dom0-xt
+
+      - name: Clone aos-core-zephyr
+        uses: actions/checkout@v4
+        if: matrix.project == 'aos-core-zephyr'
+        with:
+          repository: aoscloud/aos_core_zephyr
+          ref: ${{ env.aos_revision }}
+          path: aos-core-zephyr
+
+      - name: Environment setup
+        run: |
+          west init -l ${{ matrix.project }}
+          west update
+
+      - name: Check out zephyr-xenlib
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: zephyr-xenlib
+
+      - name: Build zephyr-dom0-xt
+        if: matrix.project == 'zephyr-dom0-xt'
+        run: |
+          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
+
+      - name: Build aos-core-zephyr
+        if: matrix.project == 'aos-core-zephyr'
+        run: |
+          touch u-boot.bin
+          touch dtb.dtb
+          touch rootca.pem
+          west build -p always -b ${{ matrix.target }} aos-core-zephyr -- -DSHIELD=xen_dom0 \
+            -D'CONFIG_DOMD_UBOOT_PATH="../u-boot.bin"' \
+            -D'CONFIG_DOMD_DTB_PATH="../dtb.dtb"' \
+            -D'CONFIG_AOS_ROOT_CA_PATH="../rootca.pem"'
+
