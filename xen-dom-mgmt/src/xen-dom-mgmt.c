@@ -940,7 +940,6 @@ static int init_domain0(const struct device *d)
 #ifdef CONFIG_XSTAT
 	dom0->num_vcpus = dom0stat->num_vcpus;
 	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
-	k_free(dom0stat);
 #else
 	dom0->num_vcpus = 0;
 	dom0->max_mem_kb = 0;
