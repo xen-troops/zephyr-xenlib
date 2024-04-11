@@ -945,10 +945,21 @@ static int init_domain0(const struct device *d)
 	dom0->max_mem_kb = 0;
 #endif
 
-	xs_init_root();
-	xss_write("/tool/xenstored", "");
-	xs_initialize_xenstore(0, dom0);
+	ret = xs_init_root();
+	if (ret) {
+		LOG_ERR("Failed to init Xenstore root node");
+		goto out;
+	}
 
+	ret = xss_write("/tool/xenstored", "");
+	if (ret) {
+		LOG_ERR("Failed to create /tool/xenstored node, err = %d", ret);
+	}
+
+	ret = xs_initialize_xenstore(0, dom0);
+	if (ret) {
+		LOG_ERR("Failed to add Domain-0 xenstore entries, err = %d", ret);
+	}
 out:
 #ifdef CONFIG_XSTAT
 	k_free(dom0stat);

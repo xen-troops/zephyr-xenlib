@@ -2121,8 +2121,7 @@ int xs_init_root(void)
 
 	sys_dlist_init(&root_xenstore.child_list);
 	sys_dnode_init(&root_xenstore.node);
-	set_perms_by_array(&root_xenstore, &permissions, 1);
 
-	return 0;
+	return set_perms_by_array(&root_xenstore, &permissions, 1);
 }
 
