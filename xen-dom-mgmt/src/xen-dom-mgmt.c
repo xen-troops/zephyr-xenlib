@@ -916,12 +916,10 @@ static int init_domain0(const struct device *d)
 	}
 
 	ret = xstat_getdominfo(dom0stat, 0, 1);
+	/* Zero means no domains, theoretically impossible */
+	__ASSERT_NO_MSG(ret);
 	if (ret < 0) {
 		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
-		goto out;
-	} else if (ret == 0) {
-		/* Theoretically impossible */
-		ret = -EINVAL;
 		goto out;
 	}
 #endif
