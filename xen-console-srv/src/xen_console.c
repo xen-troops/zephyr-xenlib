@@ -39,7 +39,9 @@ LOG_MODULE_REGISTER(xen_domain_console);
 
 static K_THREAD_STACK_ARRAY_DEFINE(read_thrd_stack, CONFIG_DOM_MAX,
 				   XEN_CONSOLE_STACK_SIZE);
+#ifdef CONFIG_XEN_SHELL
 static K_THREAD_STACK_DEFINE(display_thrd_stack, XEN_CONSOLE_STACK_SIZE);
+#endif /* CONFIG_XEN_SHELL */
 
 static uint32_t used_threads;
 static K_MUTEX_DEFINE(global_console_lock);
@@ -101,6 +103,7 @@ static void console_feed_int_ring(struct xen_domain_console *console, char ch)
 	}
 }
 
+#ifdef CONFIG_XEN_SHELL
 /* Write data to DomU
  * Please note that ring buffers named in accordance to DomU point of view:
  * intf->in is DomU input and our output;
@@ -136,6 +139,7 @@ static void write_to_ext_ring(struct xencons_interface *intf,
 	z_barrier_dsync_fence_full();		/* Write data, then update counter */
 	intf->in_prod = prod;
 }
+#endif /* CONFIG_XEN_SHELL */
 
 /* Read from domU ring buffer into a local ring buffer.
  * Please note that ring buffers named in accordance to DomU point of view:
