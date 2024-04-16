@@ -29,6 +29,8 @@
 #define _XEN_DOMCTL_CDF_hap           1
 #define XEN_DOMCTL_CDF_hap            (1U << _XEN_DOMCTL_CDF_hap)
 
+#define CONTAINER_NAME_SIZE 64
+
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
 	uint64_t first_gfn;
@@ -57,7 +59,22 @@ typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
  */
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
+struct pv_net_configuration {
+};
+
+struct pv_block_configuration {
+};
+
+#define MAX_PV_NET_DEVICES 3
+#define MAX_PV_BLOCK_DEVICES 3
+
+struct backend_configuration {
+	struct pv_net_configuration vifs[MAX_PV_NET_DEVICES];
+	struct pv_block_configuration disks[MAX_PV_BLOCK_DEVICES];
+};
+
 struct xen_domain_cfg {
+	char name[CONTAINER_NAME_SIZE];
 	uint64_t mem_kb;
 
 	uint32_t flags;
@@ -91,6 +108,7 @@ struct xen_domain_cfg {
 	get_image_size_t get_image_size;
 
 	void *image_info;
+	struct backend_configuration back_cfg;
 };
 
 struct xen_domain_console {
