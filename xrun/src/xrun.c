@@ -96,6 +96,7 @@ struct container {
 	char dt_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	bool has_dt_image;
 	enum container_status status;
+	int refcount;
 };
 
 static const struct json_obj_descr hypervisor_spec_descr[] = {
@@ -163,78 +164,83 @@ int parse_config_json(char *json, size_t json_size, struct domain_spec *domain)
 	return ret;
 }
 
-static struct container *get_container(const char *container_id)
+static struct container *get_container_locked(const char *container_id)
 {
 	struct container *container = NULL;
-
-	k_mutex_lock(&container_lock, K_FOREVER);
-
 	SYS_SLIST_FOR_EACH_CONTAINER(&container_list, container, node) {
 		if (strncmp(container->container_id, container_id,
 			    CONTAINER_NAME_SIZE) == 0) {
 			break;
 		}
 	}
+	if (container) {
+		container->refcount++;
+	}
+
+	return container;
+}
+static struct container *get_container(const char *container_id)
+{
+	struct container *container = NULL;
+
+	k_mutex_lock(&container_lock, K_FOREVER);
+
+	container = get_container_locked(container_id);
 
 	k_mutex_unlock(&container_lock);
 	return container;
+}
+
+static void put_container(struct container *container)
+{
+	int ret;
+
+	if (!container) {
+		return;
+	}
+	k_mutex_lock(&container_lock, K_FOREVER);
+
+	container->refcount--;
+	if (container->refcount == 0) {
+		ret = domain_destroy(container->domid);
+		if (ret) {
+			LOG_ERR("Failed to destroy domain %llu", container->domid);
+		}
+
+		sys_slist_find_and_remove(&container_list, &container->node);
+		k_free(container);
+	}
+
+	k_mutex_unlock(&container_lock);
 }
 
 static struct container *register_container_id(const char *container_id)
 {
 	struct container *container;
 
-	/*
-	 * TODO: There is a problem with all calls to
-	 * get_container function that on multithread
-	 * systems container may be freed right after
-	 * return from the function. This may lead to
-	 * unexpected failures which are hard to catch.
-	 *
-	 * This should be applied to all get_container
-	 * calls.
-	 *
-	 * There are two ways to handle this situation:
-	 * - Hold the global lock the whole time you are
-	 * holding pointer to a container.
-	 * - Add reference counting (like linux kref) to
-	 * ensure that this object does not disappear under
-	 * your feet.
-	 */
-	container = get_container(container_id);
+	k_mutex_lock(&container_lock, K_FOREVER);
+	container = get_container_locked(container_id);
 	if (container) {
+		k_mutex_unlock(&container_lock);
+		put_container(container);
 		LOG_ERR("Container %s already exists", container_id);
 		return NULL;
 	}
 
 	container = (struct container *)k_malloc(sizeof(*container));
 	if (!container) {
+		k_mutex_unlock(&container_lock);
 		return NULL;
 	}
 
 	strncpy(container->container_id, container_id, CONTAINER_NAME_SIZE);
 	container->domid = next_domid++;
 
-	k_mutex_lock(&container_lock, K_FOREVER);
 	sys_slist_append(&container_list, &container->node);
+	container->refcount = 1;
 	k_mutex_unlock(&container_lock);
 
 	return container;
-}
-
-static int unregister_container_id(const char *container_id)
-{
-	struct container *container = get_container(container_id);
-
-	if (!container) {
-		return -ENOENT;
-	}
-
-	k_mutex_lock(&container_lock, K_FOREVER);
-	sys_slist_find_and_remove(&container_list, &container->node);
-	k_mutex_unlock(&container_lock);
-	k_free(container);
-	return 0;
 }
 
 static int load_image_bytes(uint8_t *buf, size_t bufsize,
@@ -612,7 +618,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	k_free(config);
  err:
 	k_free(domcfg.cmdline);
-	unregister_container_id(container_id);
+	put_container(container);
  err_unlock:
 	k_mutex_unlock(&container_run_lock);
 	return ret;
@@ -629,11 +635,13 @@ int xrun_pause(const char *container_id)
 
 	ret = domain_pause(container->domid);
 	if (ret) {
-		return ret;
+		goto out;
 	}
 
 	container->status = PAUSED;
-	return 0;
+out:
+	put_container(container);
+	return ret;
 }
 
 int xrun_resume(const char *container_id)
@@ -647,11 +655,13 @@ int xrun_resume(const char *container_id)
 
 	ret = domain_unpause(container->domid);
 	if (ret) {
-		return ret;
+		goto out;
 	}
 
 	container->status = RUNNING;
-	return 0;
+out:
+	put_container(container);
+	return ret;
 }
 
 int xrun_kill(const char *container_id)
@@ -663,12 +673,10 @@ int xrun_kill(const char *container_id)
 		return -EINVAL;
 	}
 
-	ret = domain_destroy(container->domid);
-	if (ret) {
-		return ret;
-	}
-
-	return unregister_container_id(container_id);
+	/* Put container twice to drop the last reference */
+	put_container(container);
+	put_container(container);
+	return ret;
 }
 
 int xrun_state(const char *container_id, enum container_status *state)
@@ -680,5 +688,6 @@ int xrun_state(const char *container_id, enum container_status *state)
 	}
 
 	*state = container->status;
+	put_container(container);
 	return 0;
 }
