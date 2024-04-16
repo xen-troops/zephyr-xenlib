@@ -33,3 +33,8 @@ int domain_unpause(uint32_t domid)
 {
 	return 0;
 }
+
+int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
+{
+	return 0;
+}

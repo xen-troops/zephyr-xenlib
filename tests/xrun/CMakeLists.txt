@@ -7,6 +7,6 @@ project(test_xrun)
 target_include_directories(app PRIVATE ${APPLICATION_SOURCE_DIR}/../../xrun/include/
 ${APPLICATION_SOURCE_DIR}/include)
 
-FILE(GLOB app_sources src/main.c src/mock-storage.c src/mock-xen-dom-mgmt.c)
+FILE(GLOB app_sources src/main.c src/mock-storage.c src/mock-xen-dom-mgmt.c src/mock-parser.c)
 target_sources(app PRIVATE ${app_sources} ../../xrun/src/xrun.c)
 zephyr_include_directories(include)
