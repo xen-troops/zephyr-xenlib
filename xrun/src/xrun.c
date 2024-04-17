@@ -96,6 +96,7 @@ struct container {
 	char dt_image[CONFIG_XRUN_MAX_PATH_SIZE];
 	bool has_dt_image;
 	enum container_status status;
+	struct k_mutex lock;
 	int refcount;
 };
 
@@ -235,6 +236,7 @@ static struct container *register_container_id(const char *container_id)
 
 	strncpy(container->container_id, container_id, CONTAINER_NAME_SIZE);
 	container->domid = next_domid++;
+	k_mutex_init(&container->lock);
 
 	sys_slist_append(&container_list, &container->node);
 	container->refcount = 1;
@@ -632,6 +634,7 @@ int xrun_pause(const char *container_id)
 	if (!container) {
 		return -EINVAL;
 	}
+	k_mutex_lock(&container->lock, K_FOREVER);
 
 	ret = domain_pause(container->domid);
 	if (ret) {
@@ -640,6 +643,7 @@ int xrun_pause(const char *container_id)
 
 	container->status = PAUSED;
 out:
+	k_mutex_unlock(&container->lock);
 	put_container(container);
 	return ret;
 }
@@ -652,6 +656,7 @@ int xrun_resume(const char *container_id)
 	if (!container) {
 		return -EINVAL;
 	}
+	k_mutex_lock(&container->lock, K_FOREVER);
 
 	ret = domain_unpause(container->domid);
 	if (ret) {
@@ -660,6 +665,7 @@ int xrun_resume(const char *container_id)
 
 	container->status = RUNNING;
 out:
+	k_mutex_unlock(&container->lock);
 	put_container(container);
 	return ret;
 }
