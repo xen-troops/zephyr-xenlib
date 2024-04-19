@@ -262,14 +262,11 @@ int xs_add_pvblock_xenstore(const struct pv_block_configuration *cfg, int domid)
 	return 0;
 }
 
-int xs_remove_xenstore_backends(int domid)
+int xs_remove_xenstore_backends(struct xen_domain *domain)
 {
 	char lbuffer[INIT_XENSTORE_BUFF_SIZE] = { 0 };
 	static const char basepref[] = "/local/domain";
 	int rc = 0, i;
-	struct xen_domain *domain = NULL;
-
-	domain = domid_to_domain(domid);
 
 	for (i = 0; i < MAX_PV_NET_DEVICES; i++) {
 		if (domain->back_state.vifs[i].functional) {
@@ -278,7 +275,7 @@ int xs_remove_xenstore_backends(int domid)
 			 * at least one fucntional vif backend.
 			 */
 			sprintf(lbuffer, "%s/%d/backend/vif/%d", basepref,
-				domain->back_state.vifs[i].backend_domain_id, domid);
+				domain->back_state.vifs[i].backend_domain_id, domain->domid);
 			rc = xss_rm(lbuffer);
 			if (rc) {
 				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);
@@ -294,7 +291,7 @@ int xs_remove_xenstore_backends(int domid)
 			 * at least one fucntional vbd backend.
 			 */
 			sprintf(lbuffer, "%s/%d/backend/vbd/%d", basepref,
-				domain->back_state.disks[i].backend_domain_id, domid);
+				domain->back_state.disks[i].backend_domain_id, domain->domid);
 			rc = xss_rm(lbuffer);
 			if (rc) {
 				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);

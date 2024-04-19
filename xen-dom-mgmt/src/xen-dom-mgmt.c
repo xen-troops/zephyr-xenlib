@@ -869,7 +869,7 @@ int domain_destroy(uint32_t domid)
 		return -ENOTSUP;
 	}
 
-	rc = xs_remove_xenstore_backends(domid);
+	rc = xs_remove_xenstore_backends(domain);
 	if (rc) {
 		LOG_ERR("Failed to remove_xenstore_backends domain#%u (rc=%d)", domain->domid, rc);
 		err = rc;
