@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        target: [rcar_spider, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
+        target: [rcar_spider_ca55, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
         project: [zephyr-dom0-xt, aos-core-zephyr]
         exclude:
           - target: qemu_cortex_a53
@@ -83,7 +83,7 @@ jobs:
       - name: Build zephyr-dom0-xt
         if: matrix.project == 'zephyr-dom0-xt'
         run: |
-          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -- -DSHIELD=xen_dom0
+          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -S xen_dom0
 
       - name: Build aos-core-zephyr
         if: matrix.project == 'aos-core-zephyr'
@@ -91,7 +91,7 @@ jobs:
           touch u-boot.bin
           touch dtb.dtb
           touch rootca.pem
-          west build -p always -b ${{ matrix.target }} aos-core-zephyr -- -DSHIELD=xen_dom0 \
+          west build -p always -b ${{ matrix.target }} aos-core-zephyr -S xen_dom0 \
             -D'CONFIG_DOMD_UBOOT_PATH="../u-boot.bin"' \
             -D'CONFIG_DOMD_DTB_PATH="../dtb.dtb"' \
             -D'CONFIG_AOS_ROOT_CA_PATH="../rootca.pem"'
