@@ -584,23 +584,64 @@ static int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
 	return rc;
 }
 
-/*
- * TODO: Access to domain_list and domains should be protected, considering that it may be
- * destroyed after receiving pointer to actual domain. So all accesses to domains structs should be
- * protected globally or via refcounts. This requires code audit in all libs, that are using this
- * function (currently xenstore-srv and xen_shell).
- */
-struct xen_domain *domid_to_domain(uint32_t domid)
+struct xen_domain *get_domain(uint32_t domid)
 {
 	struct xen_domain *iter;
 
+	k_mutex_lock(&dl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER (&domain_list, iter, node) {
 		if (iter->domid == domid) {
-			return iter;
+			iter->refcount++;
+			break;
 		}
 	}
+	k_mutex_unlock(&dl_mutex);
+	return iter;
+}
 
-	return NULL;
+void put_domain(struct xen_domain *domain)
+{
+	int rc;
+
+	if (!domain) {
+		LOG_ERR("Domain is NULL");
+		return;
+	}
+	__ASSERT(!domain->f_dom0less, "dom0less domain#%u operation not supported", domain->domid);
+
+	k_mutex_lock(&dl_mutex, K_FOREVER);
+	domain->refcount--;
+	if (domain->refcount == 0) {
+		rc = xs_remove_xenstore_backends(domain);
+		if (rc) {
+			LOG_ERR("Failed to remove_xenstore_backends domain#%u (rc=%d)",
+					domain->domid, rc);
+		}
+
+		rc = stop_domain_stored(domain);
+		if (rc) {
+			LOG_ERR("Failed to stop domain#%u store (rc=%d)", domain->domid, rc);
+		}
+
+		xs_deinitialize_domain_xenstore(domain->domid);
+
+	#ifdef CONFIG_XEN_CONSOLE_SRV
+		rc = xen_stop_domain_console(domain);
+		if (rc) {
+			LOG_ERR("Failed to stop domain#%u console (rc=%d)", domain->domid, rc);
+		}
+	#endif
+
+		rc = xen_domctl_destroydomain(domain->domid);
+		if (rc) {
+			LOG_ERR("Failed to destroy domain#%u (rc=%d)", domain->domid, rc);
+		}
+
+		sys_dlist_remove(&domain->node);
+		--dom_num;
+		k_free(domain);
+	}
+	k_mutex_unlock(&dl_mutex);
 }
 
 struct xen_domain_cfg *domain_find_config(const char *name)
@@ -827,6 +868,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 
 	k_mutex_lock(&dl_mutex, K_FOREVER);
+	domain->refcount = 1;
 	sys_dnode_init(&domain->node);
 	sys_dlist_append(&domain_list, &domain->node);
 	++dom_num;
@@ -854,57 +896,20 @@ destroy_domain:
 
 int domain_destroy(uint32_t domid)
 {
-	int rc, err = 0;
 	struct xen_domain *domain = NULL;
 
-	domain = domid_to_domain(domid);
+	domain = get_domain(domid);
 	if (!domain) {
 		LOG_ERR("Domain with domid#%u is not found", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
 
-	if (domain->f_dom0less) {
-		LOG_ERR("dom0less domain#%u operation not supported", domid);
-		return -ENOTSUP;
-	}
+	/* Call put domain twice to drop the original reference and trigger freeing */
+	put_domain(domain);
+	put_domain(domain);
 
-	rc = xs_remove_xenstore_backends(domain);
-	if (rc) {
-		LOG_ERR("Failed to remove_xenstore_backends domain#%u (rc=%d)", domain->domid, rc);
-		err = rc;
-	}
-
-	rc = stop_domain_stored(domain);
-	if (rc) {
-		LOG_ERR("Failed to stop domain#%u store (rc=%d)", domain->domid, rc);
-		err = rc;
-	}
-
-	xs_deinitialize_domain_xenstore(domid);
-
-#ifdef CONFIG_XEN_CONSOLE_SRV
-	rc = xen_stop_domain_console(domain);
-	if (rc) {
-		LOG_ERR("Failed to stop domain#%u console (rc=%d)", domain->domid, rc);
-		err = rc;
-	}
-#endif
-
-	rc = xen_domctl_destroydomain(domid);
-	if (rc) {
-		LOG_ERR("Failed to destroy domain#%u (rc=%d)", domain->domid, rc);
-		err = rc;
-	}
-
-	k_mutex_lock(&dl_mutex, K_FOREVER);
-	sys_dlist_remove(&domain->node);
-	--dom_num;
-	k_mutex_unlock(&dl_mutex);
-
-	k_free(domain);
-
-	return err;
+	return 0;
 }
 
 int domain_pause(uint32_t domid)
@@ -912,7 +917,7 @@ int domain_pause(uint32_t domid)
 	int rc;
 	struct xen_domain *domain = NULL;
 
-	domain = domid_to_domain(domid);
+	domain = get_domain(domid);
 	if (!domain) {
 		LOG_ERR("Domain with domid#%u is not found", domid);
 		/* Domain with requested domid is not present in list */
@@ -923,6 +928,7 @@ int domain_pause(uint32_t domid)
 	if (rc) {
 		LOG_ERR("domain:%u pause failed (%d)", domid, rc);
 	}
+	put_domain(domain);
 
 	return rc;
 }
@@ -932,7 +938,7 @@ int domain_unpause(uint32_t domid)
 	struct xen_domain *domain = NULL;
 	int rc;
 
-	domain = domid_to_domain(domid);
+	domain = get_domain(domid);
 	if (!domain) {
 		LOG_ERR("Domain with domid#%u is not found", domid);
 		/* Domain with requested domid is not present in list */
@@ -944,6 +950,7 @@ int domain_unpause(uint32_t domid)
 		LOG_ERR("domain:%u unpause failed (%d)", domid, rc);
 	}
 
+	put_domain(domain);
 	return rc;
 }
 
@@ -954,7 +961,7 @@ int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
 	struct backends_state *bs = NULL;
 	const struct backend_configuration *bc = NULL;
 
-	domain = domid_to_domain(domid);
+	domain = get_domain(domid);
 	bs = &domain->back_state;
 	bc = &domcfg->back_cfg;
 
@@ -984,9 +991,11 @@ int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
 		}
 	}
 
+	put_domain(domain);
 	return 0;
 
 deinit:
+	put_domain(domain);
 	LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)", domid, rc);
 	domain_destroy(domid);
 	return rc;
