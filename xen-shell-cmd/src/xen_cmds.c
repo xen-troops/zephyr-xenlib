@@ -186,7 +186,7 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	domain = domid_to_domain(domid);
+	domain = get_domain(domid);
 	if (!domain) {
 		shell_error(shell, "domid#%u is not found", domid);
 		/* Domain with requested domid is not present in list */
