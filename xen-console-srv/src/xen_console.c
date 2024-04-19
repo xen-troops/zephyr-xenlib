@@ -349,10 +349,11 @@ int xen_stop_domain_console(struct xen_domain *domain)
 	/* Stop attached console if any */
 	if (current_console == console) {
 		k_sem_give(&console->int_sem);
+		k_mutex_unlock(&global_console_lock);
 		k_thread_join(&console->int_thrd, K_FOREVER);
-		current_console = NULL;
+	} else {
+		k_mutex_unlock(&global_console_lock);
 	}
-	k_mutex_unlock(&global_console_lock);
 
 	k_free(console->int_buf);
 
