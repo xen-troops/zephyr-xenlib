@@ -900,9 +900,8 @@ deinit:
 	return rc;
 }
 
-static int init_domain0(const struct device *d)
+static int init_domain0(void)
 {
-	ARG_UNUSED(d);
 	int ret = 0;
 	struct xen_domain *dom0 = NULL;
 #ifdef CONFIG_XSTAT
