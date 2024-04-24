@@ -632,7 +632,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
 	config.grant_opts = XEN_DOMCTL_GRANT_version(1);
-	rc = xen_domctl_createdomain(domid, &config);
+	rc = xen_domctl_createdomain(&domid, &config);
 	if (rc) {
 		LOG_ERR("Failed to create domain#%u (rc=%d)", domid, rc);
 		return rc;
