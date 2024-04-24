@@ -749,7 +749,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 			goto stop_domain_console;
 		}
 	} else {
-		LOG_INF("Created domain is paused\nTo unpause issue: xu unpause -d %u", domid);
+		LOG_INF("Created domain is paused\nTo unpause issue: xu unpause %u", domid);
 	}
 
 	k_mutex_lock(&dl_mutex, K_FOREVER);
