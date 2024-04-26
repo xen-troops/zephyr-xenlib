@@ -620,6 +620,14 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 struct xen_domain_cfg *domain_find_config(const char *name)
 {
 	__maybe_unused struct xen_domain_cfg *cfg = NULL;
+	int i;
+
+	for (i = 0; i < domain_get_user_cfg_count(); i++) {
+		cfg = domain_get_user_cfg(i);
+		if (strncmp(cfg->name, name, CONTAINER_NAME_SIZE) == 0) {
+			return cfg;
+		}
+	}
 
 #ifdef CONFIG_XEN_DOMCFG_SECTION
 	for (cfg = _domain_configs_start; cfg < _domain_configs_end; cfg++) {
@@ -629,6 +637,17 @@ struct xen_domain_cfg *domain_find_config(const char *name)
 	}
 #endif
 
+	return NULL;
+}
+
+__weak int domain_get_user_cfg_count(void)
+{
+	return 0;
+}
+
+__weak struct xen_domain_cfg *domain_get_user_cfg(int index)
+{
+	ARG_UNUSED(index);
 	return NULL;
 }
 
