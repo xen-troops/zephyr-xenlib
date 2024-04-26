@@ -64,6 +64,23 @@ int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid);
  */
 struct xen_domain_cfg *domain_find_config(const char *name);
 
+/**
+ * This function returns the count of user configurations for a domain.
+ *
+ * The function is defined as weak, so it can be overridden by the user.
+ * @return The count of user configurations.
+ */
+int domain_get_user_cfg_count(void);
+
+/**
+ * This function returns the user configuration for a domain specified by the given index.
+ *
+ * The function is defined as weak, so it can be overridden by the user.
+ * @param id The ID of the domain.
+ * @return The user configuration for the domain, or NULL if not found.
+ */
+struct xen_domain_cfg *domain_get_user_cfg(int index);
+
 #ifdef CONFIG_XEN_DOMCFG_SECTION
 #define DECL_CONFIG static __section(".domain_configs") __used
 extern struct xen_domain_cfg _domain_configs_start[];
