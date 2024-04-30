@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-/*
+/**
  * Start console thread in dom0, that reads domain output.
  *
  * @param domain - domain, where console thread will be started
@@ -21,7 +21,7 @@ extern "C" {
  */
 int xen_start_domain_console(struct xen_domain *domain);
 
-/*
+/**
  * Stop console thread in dom0, that reads domain output.
  *
  * @param domain - domain, where console thread will be stopped
@@ -30,7 +30,7 @@ int xen_start_domain_console(struct xen_domain *domain);
  */
 int xen_stop_domain_console(struct xen_domain *domain);
 
-/*
+/**
  * Attach Zephyr shell to console in given domain
  *
  * @param shell - Zephyr shell instance attach to

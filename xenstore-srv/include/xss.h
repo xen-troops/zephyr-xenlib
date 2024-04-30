@@ -19,7 +19,7 @@ enum xs_perm {
 	XS_PERM_BOTH = XS_PERM_WRITE | XS_PERM_READ
 };
 
-/*
+/**
  * Read the value associated with a path.
  *
  * @param path Xenstore path
@@ -29,7 +29,7 @@ enum xs_perm {
  */
 int xss_read(const char *path, char *value, size_t len);
 
-/*
+/**
  * Associates a value with a path.
  *
  * @param path Xenstore path
@@ -38,7 +38,7 @@ int xss_read(const char *path, char *value, size_t len);
  */
 int xss_write(const char *path, const char *value);
 
-/*
+/**
  * Associates a value with a path and set read-write permissions for given domid.
  *
  * @param path Xenstore path
@@ -47,7 +47,7 @@ int xss_write(const char *path, const char *value);
  */
 int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domid);
 
-/*
+/**
  * Associates a value with a path and set read-only permissions for given domid.
  *
  * @param path Xenstore path
@@ -56,7 +56,7 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
  */
 int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domid);
 
-/*
+/**
  * Associates a value with a path and set none for domid1 and read-only for domid2
  * permissions.
  *
@@ -69,7 +69,7 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 int xss_write_guest_with_permissions(const char *path, const char *value, uint32_t domid1,
 				     uint32_t domid2);
 
-/*
+/**
  * Read path and parse it as an integer.
  *
  * @param path Xenstore path
@@ -78,7 +78,7 @@ int xss_write_guest_with_permissions(const char *path, const char *value, uint32
  */
 int xss_read_integer(const char *path, int *value);
 
-/*
+/**
  * Sets permissions for input path and domid.
  *
  * @param path Xenstore path
@@ -88,7 +88,7 @@ int xss_read_integer(const char *path, int *value);
  */
 int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
 
-/*
+/**
  * Removes the value associated with a path.
  *
  * @param path Xenstore path
@@ -96,7 +96,7 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
  */
 int xss_rm(const char *path);
 
-/*
+/**
  * List all entries in a directory.
  *
  * @param path Xenstore path
