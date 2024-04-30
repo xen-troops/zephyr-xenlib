@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-/*
+/**
  * @brief Read buffer fron file on storage
  *
  * @param fpath - absolute path to the file
@@ -26,7 +26,7 @@ extern "C" {
 ssize_t xrun_read_file(const char *fpath, char *buf,
 		       size_t size, int skip);
 
-/*
+/**
  * @brief Get size of the file on storage
  *
  * @param fpath - absolute path to the file

@@ -16,7 +16,7 @@ enum container_status {
 	DESTROYED,
 };
 
-/*
+/**
  * @brief Start runx container
  *
  * @param bundle - path to the container bundle
@@ -28,7 +28,7 @@ enum container_status {
  */
 int xrun_run(const char *bundle, int console_socket, const char *container_id);
 
-/*
+/**
  * @brief Pause runx container
  *
  * @param container_id - unique container id string
@@ -37,7 +37,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id);
  */
 int xrun_pause(const char *container_id);
 
-/*
+/**
  * @brief Resume to runx container
  *
  * @param container_id - unique container id string
@@ -46,7 +46,7 @@ int xrun_pause(const char *container_id);
  */
 int xrun_resume(const char *container_id);
 
-/*
+/**
  * @brief Kill runx container
  *
  * @param container_id - unique container id string
@@ -55,7 +55,7 @@ int xrun_resume(const char *container_id);
  */
 int xrun_kill(const char *container_id);
 
-/*
+/**
  * @brief Kill runx container
  *
  * @param container_id - unique container id string
