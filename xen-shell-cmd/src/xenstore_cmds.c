@@ -48,30 +48,36 @@ static int xs_write(const struct shell *shell, size_t argc, char **argv)
 	return rc;
 }
 
+static void xs_ls_cb(void *data, const char *key, const char *value, int depth)
+{
+	const struct shell *shell = data;
+
+	if (!key) {
+		shell_print(shell, "%d: root", depth);
+		return;
+	}
+
+	if (value) {
+		shell_print(shell, "%d: %*s%s = %s", depth, depth * 2, " ", key, value);
+	} else {
+		shell_print(shell, "%d: %*s%s", depth, depth * 2, " ", key);
+	}
+}
+
 static int xs_ls(const struct shell *shell, size_t argc, char **argv)
 {
-	int i, len;
-	char **paths;
+	int rc;
 
 	if (argc != 2) {
 		return -EINVAL;
 	}
 
-	paths = xss_list_entries(argv[1], &len);
-
-	if (!paths) {
-		shell_error(shell, "Failed to list xenstore path %s", argv[1]);
-		return -EINVAL;
+	rc = xss_list_traverse(argv[1], xs_ls_cb, (struct shell *)shell);
+	if (rc) {
+		shell_error(shell, "Failed to list xenstore path %s (%d)", argv[1], rc);
 	}
 
-	shell_print(shell, "Listing xenstore path %s", argv[1]);
-	for (i = 0; i < len; i++) {
-		shell_print(shell, "%s", paths[i]);
-		k_free(paths[i]);
-	}
-	k_free(paths);
-
-	return 0;
+	return rc;
 }
 
 static int xs_rm(const struct shell *shell, size_t argc, char **argv)
