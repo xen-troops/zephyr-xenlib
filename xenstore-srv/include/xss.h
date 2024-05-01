@@ -105,6 +105,33 @@ int xss_rm(const char *path);
  */
 char **xss_list_entries(const char *path, int *len);
 
+/**
+ * @brief Xenstore traverse callback
+ *
+ * @param[in] data User data passed in xss_list_traverse()
+ * @param[in] key Xenstore entry name
+ * @param[in] value Xenstore entry value, NULL if not set
+ * @param[in] depth Xenstore tree current depth, starting from 0 (root)
+ */
+typedef void (*xss_traverse_callback_t)(void *data, const char *key, const char *value, int depth);
+
+/**
+ * @brief traverse all entries in a directory recursively
+ *
+ * This function traverses all Xenstore entries starting from @p path and calls
+ * user callback @p cb for each entry.
+ *
+ * @param[in] path Xenstore path
+ * @param[in] cb traverse callback
+ * @param[in] data to be passed in @p cb
+ *
+ * @retval 0 If successful
+ * @retval -EINVAL if @cb not provided
+ * @retval -ENOENT if @p path not found
+ */
+int xss_list_traverse(const char *path, xss_traverse_callback_t cb, void *data);
+
+
 #ifdef __cplusplus
 }
 #endif
