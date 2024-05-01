@@ -1187,6 +1187,50 @@ err_free:
 	return NULL;
 }
 
+static void xss_list_traverse_entry(struct xs_entry *entry, xss_traverse_callback_t cb, void *data,
+				    int depth)
+{
+	struct xs_entry *iter, *next;
+	sys_dlist_t *children;
+
+	cb(data, entry->key, entry->value, depth);
+	depth++;
+
+	children = &entry->child_list;
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, iter, next, node) {
+		xss_list_traverse_entry(iter, cb, data, depth);
+	}
+}
+
+int xss_list_traverse(const char *path, xss_traverse_callback_t cb, void *data)
+{
+	struct xs_entry *entry, *iter, *next;
+	sys_dlist_t *children;
+	int depth = 0;
+
+	if (!cb) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&xsel_mutex, K_FOREVER);
+	entry = key_to_entry(path);
+	if (!entry) {
+		k_mutex_unlock(&xsel_mutex);
+		return -ENOENT;
+	}
+
+	cb(data, entry->key, entry->value, depth);
+	depth++;
+
+	children = &entry->child_list;
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, iter, next, node) {
+		xss_list_traverse_entry(iter, cb, data, depth);
+	}
+
+	k_mutex_unlock(&xsel_mutex);
+	return 0;
+}
+
 int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 {
 	int rc;
