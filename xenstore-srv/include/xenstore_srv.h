@@ -43,8 +43,27 @@ struct xenstore {
 	bool pending_stop_transaction;
 };
 
+/**
+ * Starts the xenstore daemon for the specified domain.
+ *
+ * @param domain The Xen domain to start.
+ * @return 0 on success, or an error code on failure.
+ */
 int start_domain_stored(struct xen_domain *domain);
+
+/**
+ * Stops the xenstore daemon for the specified domain.
+ *
+ * @param domain The Xen domain to stop.
+ * @return 0 on success, or an error code on failure.
+ */
 int stop_domain_stored(struct xen_domain *domain);
+
+/**
+ * Initializes the root node of the global xenstore storage.
+ *
+ * @return 0 on success, or an error code on failure.
+ */
 int xs_init_root(void);
 
 #ifdef __cplusplus
