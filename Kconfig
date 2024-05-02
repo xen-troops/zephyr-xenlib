@@ -52,6 +52,15 @@ config XENSTORE_SHELL_READ_SIZE
 	help
 	  Sets the maximum size that xs read cmd can handle
 
+config XENSTORE_TREE_TRAVERSE_DEPTH
+	int "Maximum xs traverse depth"
+	default 8
+	range 1 16
+	depends on XEN_SHELL
+	help
+	  Sets the maximum xs traverse depth to avoid stack overflow
+	  in case of deeply nested XS trees.
+
 config XRUN_SHELL_CMDS
 	bool "Enable XRUN shell commands"
 	help
