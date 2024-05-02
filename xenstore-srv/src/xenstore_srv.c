@@ -1950,25 +1950,22 @@ static void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 	cleanup_domain_watches(domain);
 }
 
-int start_domain_stored(struct xen_domain *domain)
+int start_domain_stored(struct xen_domain *domain, xen_pfn_t store_pfn)
 {
 	int rc = 0, err_ret;
 	struct xenstore *xenstore;
 
-	if (!domain) {
-		return -EINVAL;
-	}
+	__ASSERT_NO_MSG(domain);
 
 	xenstore = &domain->xenstore;
 	xenstore->domain = domain;
 	xenstore->in = NULL;
 	sys_slist_init(&xenstore->out_list);
 	xenstore->used_out_bufs = 0;
+	k_sem_init(&xenstore->xb_sem, 0, 1);
+	atomic_clear(&xenstore->thrd_stop);
 
-	rc = xenmem_map_region(domain->domid, 1,
-			       XEN_PHYS_PFN(GUEST_MAGIC_BASE) +
-			       XENSTORE_PFN_OFFSET,
-			       (void **)&xenstore->domint);
+	rc = xenmem_map_region(domain->domid, 1, store_pfn, (void **)&xenstore->domint);
 	if (rc < 0) {
 		LOG_ERR("Failed to map xenstore ring for domain#%u (rc=%d)",
 			domain->domid, rc);
@@ -1976,9 +1973,12 @@ int start_domain_stored(struct xen_domain *domain)
 	}
 
 	xenstore->domint->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
-	xenstore->domint->connection = XENSTORE_CONNECTED;
+	if (domain->f_dom0less) {
+		xenstore->domint->connection = XENSTORE_RECONNECT;
+	} else {
+		xenstore->domint->connection = XENSTORE_CONNECTED;
+	}
 
-	k_sem_init(&xenstore->xb_sem, 0, 1);
 	rc = bind_interdomain_event_channel(domain->domid,
 					    xenstore->remote_evtchn,
 					    xs_evtchn_cb,
@@ -1990,14 +1990,14 @@ int start_domain_stored(struct xen_domain *domain)
 
 	xenstore->local_evtchn = rc;
 
-	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid,
-			       xenstore->remote_evtchn);
-	if (rc) {
-		LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
-		goto unmap_ring;
+	if (!domain->f_dom0less) {
+		rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid,
+				       xenstore->remote_evtchn);
+		if (rc) {
+			LOG_ERR("Failed to set domain xenbus evtchn param (rc=%d)", rc);
+			goto unmap_ring;
+		}
 	}
-
-	atomic_clear(&xenstore->thrd_stop);
 
 	xenstore->xs_stack_slot = get_stack_idx();
 	k_thread_create(&xenstore->thrd,
