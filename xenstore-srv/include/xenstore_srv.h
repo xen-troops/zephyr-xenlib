@@ -47,9 +47,11 @@ struct xenstore {
  * Starts the xenstore daemon for the specified domain.
  *
  * @param domain The Xen domain to start.
+ * @param store_pfn The Xenstore PFN
+ *
  * @return 0 on success, or an error code on failure.
  */
-int start_domain_stored(struct xen_domain *domain);
+int start_domain_stored(struct xen_domain *domain, xen_pfn_t store_pfn);
 
 /**
  * Stops the xenstore daemon for the specified domain.

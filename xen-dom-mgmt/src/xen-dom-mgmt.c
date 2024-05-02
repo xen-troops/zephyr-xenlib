@@ -723,7 +723,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		goto domain_free;
 	}
 
-	rc = start_domain_stored(domain);
+	rc = start_domain_stored(domain, XEN_PHYS_PFN(GUEST_MAGIC_BASE) + XENSTORE_PFN_OFFSET);
 	if (rc) {
 		LOG_ERR("Failed to start domain#%u stored (rc=%d)", domid, rc);
 		goto domain_free;
@@ -905,6 +905,143 @@ deinit:
 	return rc;
 }
 
+#ifdef CONFIG_XEN_DOM0LESS_BOOT
+static int dom0less_get_next_domain(uint32_t domid_start, struct xen_domctl_getdomaininfo *info)
+{
+	int i, rc;
+
+	__ASSERT_NO_MSG(infos);
+
+	for (i = domid_start; i < CONFIG_DOM_MAX; i++) {
+		rc = xen_domctl_getdomaininfo(i, info);
+		if (rc && rc != -ESRCH) {
+			LOG_ERR("dom0less: getdomaininfo err (%d)", rc);
+			break;
+		}
+		if (!rc) {
+			break;
+		}
+	}
+
+	return rc ? rc : i;
+}
+
+static int dom0less_init_domain(uint32_t domid, struct xen_domctl_getdomaininfo *infos)
+{
+	struct xen_domain *domain;
+	xen_pfn_t magic_base_pfn;
+	uint64_t value;
+	int rc;
+
+	domain = k_malloc(sizeof(*domain));
+	if (!domain) {
+		LOG_ERR("dom0less:domid:%u Can not allocate memory for domain", domid);
+		return -ENOMEM;
+	}
+	memset(domain, 0, sizeof(*domain));
+
+	domain->domid = domid;
+	domain->num_vcpus = infos->max_vcpu_id + 1;
+	domain->address_size = 64;
+	domain->max_mem_kb = (infos->tot_pages * XEN_PAGE_SIZE) / 1024;
+	domain->f_dom0less = true;
+
+	snprintf(domain->name, CONTAINER_NAME_SIZE, "Dom0less-%u", domid);
+
+	/*
+	 * Xenstore initialization.
+	 * In dom0less boot case the Xenstore event is already allocated and also allocated
+	 * XEN_MAGIC pages, so Dom0 here should get them and use to init Xenstore.
+	 * At the end Dom0 should set HVM_PARAM_STORE_PFN
+	 * to notify guest domain that Xenstore is ready.
+	 */
+	rc = hvm_get_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, &value);
+	if (rc) {
+		LOG_ERR("dom0less:domid:%u Get HVM_PARAM_STORE_EVTCHN err (%d)", domid, rc);
+		goto err_free;
+	}
+	domain->xenstore.remote_evtchn = value;
+
+	LOG_DBG("dom0less: remote_domid=%d, xenstore.remote_evtchn = %d", domain->domid,
+		domain->xenstore.remote_evtchn);
+
+	rc = hvm_get_parameter(HVM_PARAM_MAGIC_BASE_PFN, domid, &magic_base_pfn);
+	if (rc < 0) {
+		LOG_ERR("dom0less:domid:%u Get HVM_PARAM_MAGIC_BASE_PFN err (%d)", domid, rc);
+		goto err_free;
+	}
+
+	LOG_DBG("dom0less:domid:%u MAGIC_BASE_PFN %llx", domid, magic_base_pfn);
+	magic_base_pfn = magic_base_pfn + XENSTORE_PFN_OFFSET;
+
+	/* init Xenstore */
+	rc = start_domain_stored(domain, magic_base_pfn);
+	if (rc) {
+		LOG_ERR("dom0less:domid:%u start Xenstore err (%d)", domid, rc);
+		goto err_free;
+	}
+
+	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid, magic_base_pfn);
+	if (rc) {
+		LOG_ERR("dom0less:domid:%u set HVM_PARAM_STORE_PFN err (%d)", domid, rc);
+		goto err_free_stored;
+	}
+
+	rc = xs_initialize_xenstore(domid, domain);
+	if (rc) {
+		LOG_ERR("dom0less:domid:%u init Xenstore err (%d)", domid, rc);
+		goto err_free_stored;
+	}
+
+	notify_evtchn(domain->xenstore.remote_evtchn);
+
+	LOG_DBG("dom0less:domid:%u attached", domid);
+
+	k_mutex_lock(&dl_mutex, K_FOREVER);
+	sys_dnode_init(&domain->node);
+	sys_dlist_append(&domain_list, &domain->node);
+	++dom_num;
+	k_mutex_unlock(&dl_mutex);
+
+	/* TODO: console ? */
+	return 0;
+
+err_free_stored:
+	stop_domain_stored(domain);
+err_free:
+	k_free(domain);
+	return rc;
+}
+
+static int dom0less_init(void)
+{
+	struct xen_domctl_getdomaininfo dominfo;
+	uint32_t created_doms = 0;
+	uint32_t domid_start = 1;
+	int rc;
+
+	do {
+		rc = dom0less_get_next_domain(domid_start, &dominfo);
+		if (rc < 0) {
+			break;
+		}
+		domid_start = rc;
+
+		rc = dom0less_init_domain(domid_start, &dominfo);
+		if (rc) {
+			break;
+		}
+
+		domid_start++;
+		created_doms++;
+	} while (rc < CONFIG_DOM_MAX);
+
+	LOG_INF("dom0less: attached %d domains", created_doms);
+
+	return rc == -ESRCH ? 0 : rc;
+}
+#endif /* CONFIG_XEN_DOM0LESS_BOOT */
+
 static int init_domain0(void)
 {
 	int ret = 0;
@@ -962,6 +1099,11 @@ static int init_domain0(void)
 	if (ret) {
 		LOG_ERR("Failed to add Domain-0 xenstore entries, err = %d", ret);
 	}
+
+#ifdef CONFIG_XEN_DOM0LESS_BOOT
+	ret = dom0less_init();
+#endif /* CONFIG_XEN_DOM0LESS_BOOT */
+
 out:
 #ifdef CONFIG_XSTAT
 	k_free(dom0stat);
