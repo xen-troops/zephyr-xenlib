@@ -1145,6 +1145,11 @@ static void xss_list_traverse_entry(struct xs_entry *entry, xss_traverse_callbac
 	cb(data, entry->key, entry->value, depth);
 	depth++;
 
+	if (depth >= CONFIG_XENSTORE_TREE_TRAVERSE_DEPTH) {
+		LOG_DBG("Reached XS max traverse depth %d. skip processing", depth);
+		return;
+	}
+
 	children = &entry->child_list;
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(children, iter, next, node) {
 		xss_list_traverse_entry(iter, cb, data, depth);
