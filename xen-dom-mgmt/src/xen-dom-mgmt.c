@@ -786,6 +786,11 @@ int domain_destroy(uint32_t domid)
 		return -EINVAL;
 	}
 
+	if (domain->f_dom0less) {
+		LOG_ERR("dom0less domain#%u operation not supported", domid);
+		return -ENOTSUP;
+	}
+
 	rc = xs_remove_xenstore_backends(domid);
 	if (rc) {
 		LOG_ERR("Failed to remove_xenstore_backends domain#%u (rc=%d)", domain->domid, rc);

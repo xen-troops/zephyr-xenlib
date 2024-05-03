@@ -169,6 +169,8 @@ struct xen_domain {
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
 	struct backends_state back_state;
+
+	bool f_dom0less:1; /**< Indicates that domain was created by Xen itself */
 };
 
 struct xen_domain *domid_to_domain(uint32_t domid);
