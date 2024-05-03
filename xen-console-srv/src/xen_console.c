@@ -279,6 +279,11 @@ int xen_start_domain_console(struct xen_domain *domain)
 		return -ESRCH;
 	}
 
+	if (domain->f_dom0less) {
+		LOG_ERR("dom0less domain#%u console operation not supported", domain->domid);
+		return -ENOTSUP;
+	}
+
 	console = &domain->console;
 	if (console->ext_tid) {
 		LOG_ERR("Console thread is already running for this domain!");
@@ -313,6 +318,11 @@ int xen_stop_domain_console(struct xen_domain *domain)
 	if (!domain) {
 		LOG_ERR("No domain passed to attach_domain_console");
 		return -ESRCH;
+	}
+
+	if (domain->f_dom0less) {
+		LOG_ERR("dom0less domain#%u console operation not supported", domain->domid);
+		return -ENOTSUP;
 	}
 
 	console = &domain->console;
@@ -451,6 +461,11 @@ int xen_attach_domain_console(const struct shell *shell,
 	if (!domain) {
 		LOG_ERR("No domain passed to attach_domain_console");
 		return -ESRCH;
+	}
+
+	if (domain->f_dom0less) {
+		LOG_ERR("dom0less domain#%u console operation not supported", domain->domid);
+		return -ENOTSUP;
 	}
 
 	console = &domain->console;
