@@ -1044,26 +1044,15 @@ static int dom0less_init(void)
 
 static int init_domain0(void)
 {
+	struct xen_domctl_getdomaininfo dominfo;
 	int ret = 0;
 	struct xen_domain *dom0 = NULL;
-#ifdef CONFIG_XSTAT
-	struct xenstat_domain *dom0stat;
 
-	dom0stat = k_malloc(sizeof(*dom0stat));
-	if (!dom0stat) {
-		ret = -ENOMEM;
-		LOG_ERR("Can't allocate memory for dom0 xenstat");
-		goto out;
+	ret = xen_domctl_getdomaininfo(0, &dominfo);
+	if (ret) {
+		LOG_ERR("init: getdomaininfo err (%d)", ret);
+		return ret;
 	}
-
-	ret = xstat_getdominfo(dom0stat, 0, 1);
-	/* Zero means no domains, theoretically impossible */
-	__ASSERT_NO_MSG(ret);
-	if (ret < 0) {
-		LOG_ERR("Failed to get info for dom0 (rc=%d)", ret);
-		goto out;
-	}
-#endif
 
 	dom0 = k_malloc(sizeof(*dom0));
 	if (!dom0) {
@@ -1075,14 +1064,8 @@ static int init_domain0(void)
 
 	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
 	dom0->domid = 0;
-
-#ifdef CONFIG_XSTAT
-	dom0->num_vcpus = dom0stat->num_vcpus;
-	dom0->max_mem_kb = dom0stat->cur_mem / 1024;
-#else
-	dom0->num_vcpus = 0;
-	dom0->max_mem_kb = 0;
-#endif
+	dom0->num_vcpus = dominfo.max_vcpu_id + 1;
+	dom0->max_mem_kb = (dominfo.tot_pages * XEN_PAGE_SIZE) / 1024;
 
 	ret = xs_init_root();
 	if (ret) {
@@ -1105,9 +1088,6 @@ static int init_domain0(void)
 #endif /* CONFIG_XEN_DOM0LESS_BOOT */
 
 out:
-#ifdef CONFIG_XSTAT
-	k_free(dom0stat);
-#endif
 	k_free(dom0);
 
 	return ret;
