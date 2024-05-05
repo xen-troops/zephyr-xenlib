@@ -3,16 +3,22 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
+/**
+ * @file xen_dom_mgmt.h
+ */
 #ifndef XENLIB_XEN_DOM_MGMT_H
 #define XENLIB_XEN_DOM_MGMT_H
 
+/**
+ * @brief Xen domain control Interface
+ * @defgroup xen_domctrl Xen domain control Interface
+ * @{
+ */
 #include <domain.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 /**
  * Creates a new domain with the specified configuration.
@@ -92,5 +98,9 @@ extern struct xen_domain_cfg _domain_configs_end[];
 #ifdef __cplusplus
 }
 #endif
+
+/**
+ * @}
+ */
 
 #endif
