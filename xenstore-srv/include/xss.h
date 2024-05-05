@@ -4,19 +4,34 @@
  * Copyright (c) 2023 EPAM Systems
  *
  */
-
+/**
+ * @file xss.h
+ */
 #ifndef XENLIB_XSS_H
 #define XENLIB_XSS_H
+
 #include <zephyr/xen/public/xen.h>
 
+/**
+ * @brief Xenstore access control Interface
+ * @defgroup xen_xenstore_xss Xenstore access control Interface
+ * @{
+ */
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/**
+ * @brief Xenstore entry access permissions
+ */
 enum xs_perm {
+	/** Xenstore entry owner permissions */
 	XS_PERM_NONE = 0x0,
+	/** Xenstore entry read permissions for quest domain */
 	XS_PERM_READ = 0x1,
+	/** Xenstore entry write permissions for quest domain */
 	XS_PERM_WRITE = 0x2,
+	/** Xenstore entry both RW permissions for quest domain */
 	XS_PERM_BOTH = XS_PERM_WRITE | XS_PERM_READ
 };
 
@@ -44,6 +59,7 @@ int xss_write(const char *path, const char *value);
  *
  * @param path Xenstore path
  * @param value Xenstore value
+ * @param domid domain id with XS_PERM_BOTH
  * @return 0 on success, a negative errno value on error.
  */
 int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domid);
@@ -53,6 +69,7 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
  *
  * @param path Xenstore path
  * @param value Xenstore value
+ * @param domid domain id with XS_PERM_READ
  * @return 0 on success, a negative errno value on error.
  */
 int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domid);
@@ -98,7 +115,9 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm);
 int xss_rm(const char *path);
 
 /**
+ * @typedef xss_traverse_callback_t
  * @brief Xenstore traverse callback
+ * @see xss_list_traverse()
  *
  * @param[in] data User data passed in xss_list_traverse()
  * @param[in] key Xenstore entry name
@@ -108,23 +127,27 @@ int xss_rm(const char *path);
 typedef void (*xss_traverse_callback_t)(void *data, const char *key, const char *value, int depth);
 
 /**
- * @brief traverse all entries in a directory recursively
+ * @brief Traverses all entries in a directory recursively
  *
  * This function traverses all Xenstore entries starting from @p path and calls
  * user callback @p cb for each entry.
  *
  * @param[in] path Xenstore path
- * @param[in] cb traverse callback
+ * @param[in] cb traverse callback #xss_traverse_callback_t
  * @param[in] data to be passed in @p cb
  *
  * @retval 0 If successful
- * @retval -EINVAL if @cb not provided
+ * @retval -EINVAL if @p cb not provided
  * @retval -ENOENT if @p path not found
  */
 int xss_list_traverse(const char *path, xss_traverse_callback_t cb, void *data);
 
-
 #ifdef __cplusplus
 }
 #endif
+
+/**
+ * @}
+ */
+
 #endif /* XENLIB_XSS_H */
