@@ -508,6 +508,12 @@ int xs_initialize_xenstore(uint32_t domid, const struct xen_domain *domain)
 			 "device/suspend/event-channel",
 			 NULL };
 
+	sprintf(lbuffer, "%s/%d", basepref, domid);
+	rc = xss_write_guest_domain_rw(lbuffer, "", domid);
+	if (rc) {
+		goto deinit;
+	}
+
 	// TODO: generate properly
 	snprintf(uuid, INIT_XENSTORE_UUID_BUF_SIZE, "00000000-0000-0000-0000-%012d", domid);
 
