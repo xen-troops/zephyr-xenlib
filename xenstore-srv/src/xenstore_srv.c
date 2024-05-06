@@ -839,7 +839,6 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 	char *tok, *tok_state, *new_value;
 	size_t data_len = str_byte_size(data);
 	size_t namelen;
-	sys_dlist_t *inspected_list;
 
 	path = k_malloc(str_byte_size(const_path));
 	if (!path) {
@@ -849,11 +848,10 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 
 	strcpy(path, const_path);
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	inspected_list = &root_xenstore.child_list;
+	parent_entry = &root_xenstore;
 
 	for (tok = strtok_r(path, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
-		SYS_DLIST_FOR_EACH_CONTAINER(inspected_list, iter, node) {
-			parent_entry = iter;
+		SYS_DLIST_FOR_EACH_CONTAINER(&parent_entry->child_list, iter, node) {
 			if (strcmp(iter->key, tok) == 0) {
 				break;
 			}
@@ -887,7 +885,7 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 
 			sys_dlist_init(&iter->child_list);
 			sys_dnode_init(&iter->node);
-			sys_dlist_append(inspected_list, &iter->node);
+			sys_dlist_append(&parent_entry->child_list, &iter->node);
 			if (perms && perms_num) {
 				rc = set_perms_by_array(iter, perms, perms_num);
 			} else {
@@ -903,7 +901,7 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 			}
 		}
 
-		inspected_list = &iter->child_list;
+		parent_entry = iter;
 	}
 
 	if (iter && data_len > 0) {
