@@ -451,6 +451,7 @@ static void console_shell_cb(const struct shell *shell,
 		atomic_set_bit(&console->stop_thrd, INT_THREAD_STOP_BIT);
 		k_sem_give(&console->int_sem);
 		shell_set_bypass(shell, NULL);
+		return;
 	}
 
 	write_to_ext_ring(console->intf, data, len);
