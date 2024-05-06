@@ -5,7 +5,9 @@
  *
  */
 
-#pragma once
+#ifndef XENLIB_VCH_H
+#define XENLIB_VCH_H
+
 #include <zephyr/xen/generic.h>
 #include <zephyr/xen/public/event_channel.h>
 #include <zephyr/xen/public/grant_table.h>
@@ -85,3 +87,5 @@ int vch_write(struct vch_handle *handle, const void *buf, size_t size);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+#endif /* XENLIB_VCH_H */

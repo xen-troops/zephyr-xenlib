@@ -5,7 +5,8 @@
  *
  */
 
-#pragma once
+#ifndef XENLIB_XSS_H
+#define XENLIB_XSS_H
 #include <zephyr/xen/public/xen.h>
 
 #ifdef __cplusplus
@@ -126,3 +127,4 @@ int xss_list_traverse(const char *path, xss_traverse_callback_t cb, void *data);
 #ifdef __cplusplus
 }
 #endif
+#endif /* XENLIB_XSS_H */
