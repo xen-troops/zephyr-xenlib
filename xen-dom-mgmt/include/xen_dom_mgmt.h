@@ -87,6 +87,16 @@ int domain_get_user_cfg_count(void);
  */
 struct xen_domain_cfg *domain_get_user_cfg(int index);
 
+/**
+ * This function fetches the domain name by domain ID.
+ *
+ * @param domain_id The ID of the domain.
+ * @param name The buffer to store the domain name.
+ * @param len The length of the buffer.
+ * @return 0 on success, or an error code on failure.
+ */
+int get_domain_name(unsigned short domain_id, char *name, int len);
+
 #ifdef CONFIG_XEN_DOMCFG_SECTION
 #define DECL_CONFIG static __section(".domain_configs") __used
 extern struct xen_domain_cfg _domain_configs_start[];

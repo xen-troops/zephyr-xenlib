@@ -6,6 +6,7 @@
 
 #include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/xen/dom0/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +16,7 @@
 #endif
 
 LOG_MODULE_REGISTER(xen_shell);
+static struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
 
 static struct xen_domain_cfg domcfg_tmp;
 
@@ -264,6 +266,41 @@ int xen_config_list(const struct shell *shell, size_t argc, char **argv)
 
 	return 0;
 }
+static int domain_list(const struct shell *shell, size_t argc, char **argv)
+{
+	int i, ret;
+	char domname[CONTAINER_NAME_SIZE];
+	unsigned long memkb;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	if (ret < 0) {
+		goto out;
+	}
+	shell_fprintf(shell, SHELL_NORMAL,
+			"Name                                        ID   Mem VCPUs\tState\tTime(s)\n");
+	for (i = 0; i < ret; i++) {
+		if (get_domain_name(infos[i].domain, domname, CONTAINER_NAME_SIZE)) {
+			strncpy(domname, "(NULL)", CONTAINER_NAME_SIZE);
+		}
+		memkb = infos[i].tot_pages * XEN_PAGE_SIZE / 1024;
+		shell_fprintf(shell, SHELL_NORMAL, "%-40s %5d %5lu %5d      %c%c%c%c%c  %8.1f\n",
+					  domname,
+					  infos[i].domain,
+					  (unsigned long) (memkb / 1024),
+					  infos[i].nr_online_vcpus,
+					  infos[i].flags & XEN_DOMINF_running ? 'r' : '-',
+					  infos[i].flags & XEN_DOMINF_blocked ? 'b' : '-',
+					  infos[i].flags & XEN_DOMINF_paused ? 'p' : '-',
+					  infos[i].flags & XEN_DOMINF_shutdown ? 's' : '-',
+					  infos[i].flags & XEN_DOMINF_dying ? 'd' : '-',
+					  ((double)infos[i].cpu_time / 1e9));
+	}
+out:
+	return ret;
+}
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
@@ -293,6 +330,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      " Usage: console <domid>\n",
 		      domu_console_attach, 2, 0),
 #endif
+	SHELL_CMD_ARG(list, NULL,
+		      " List all Xen domains\n"
+			  " Usage: list\n",
+		      domain_list, 1, 0),
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2, 0);
