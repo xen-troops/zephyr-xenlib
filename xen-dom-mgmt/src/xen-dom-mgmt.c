@@ -634,6 +634,32 @@ int get_domain_name(unsigned short domain_id, char *name, int len)
 #endif
 }
 
+uint32_t find_domain_by_name(char *arg)
+{
+	char domname[CONTAINER_NAME_SIZE];
+	struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
+	uint32_t domid = 0;
+	int i, ret;
+
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	if (ret < 0) {
+		goto out;
+	}
+
+	for (i = 0; i < ret; i++) {
+		if (!get_domain_name(infos[i].domain, domname,
+					    CONTAINER_NAME_SIZE)) {
+			if (strncmp(domname, arg, CONTAINER_NAME_SIZE) == 0) {
+				domid = infos[i].domain;
+				break;
+			}
+		}
+	}
+
+out:
+	return domid;
+}
+
 __weak int domain_get_user_cfg_count(void)
 {
 	return 0;

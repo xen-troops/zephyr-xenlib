@@ -97,6 +97,14 @@ struct xen_domain_cfg *domain_get_user_cfg(int index);
  */
 int get_domain_name(unsigned short domain_id, char *name, int len);
 
+/**
+ * This function fetches the domain ID by domain name.
+ *
+ * @param name The name of the domain.
+ * @return The domain ID on success, or an error code on failure.
+ */
+uint32_t find_domain_by_name(char *arg);
+
 #ifdef CONFIG_XEN_DOMCFG_SECTION
 #define DECL_CONFIG static __section(".domain_configs") __used
 extern struct xen_domain_cfg _domain_configs_start[];
