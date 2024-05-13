@@ -53,8 +53,6 @@ struct modules_address {
  * This variable used during shell command execution, thus requires no sync. */
 static int dom_num = 0;
 
-#define DOMID_DOMD 1
-
 /* Define major and minor versions if was not provided */
 #ifndef XEN_VERSION_MAJOR
 #define XEN_VERSION_MAJOR 4
@@ -777,14 +775,10 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 		goto stop_domain_console;
 	}
 
-	if (domid == DOMID_DOMD) {
-		rc = xen_domctl_unpausedomain(domid);
-		if (rc) {
-			LOG_ERR("Failed to unpause domain#%u (rc=%d)", domid, rc);
-			goto stop_domain_console;
-		}
-	} else {
-		LOG_INF("Created domain is paused\nTo unpause issue: xu unpause %u", domid);
+	rc = xen_domctl_unpausedomain(domid);
+	if (rc) {
+		LOG_ERR("Failed to unpause domain#%u (rc=%d)", domid, rc);
+		goto stop_domain_console;
 	}
 
 	k_mutex_lock(&dl_mutex, K_FOREVER);
