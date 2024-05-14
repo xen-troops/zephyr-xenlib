@@ -33,6 +33,18 @@ uint32_t parse_domid(size_t argc, char **argv)
 	return 0;
 }
 
+void parse_and_fill_flags(size_t argc, char **argv, struct xen_domain_cfg *cfg)
+{
+	int i;
+
+	for (i = 0; i < argc; i++) {
+		/* check if domain should remain paused after creation */
+		if (argv[i][0] == '-' && argv[i][1] == 'p') {
+			cfg->f_paused = 1;
+		}
+	}
+}
+
 static int domu_create(const struct shell *shell, int argc, char **argv)
 {
 	int ret;
@@ -56,6 +68,8 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 		shell_error(shell, "Config %s not found", name);
 		return -EINVAL;
 	}
+
+	parse_and_fill_flags(argc, argv, cfg);
 
 	ret = domain_create(cfg, domid);
 	if (ret < 0) {
@@ -165,8 +179,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
 	SHELL_CMD_ARG(create, NULL,
 		      " Create Xen domain\n"
-		      " Usage: create cfg_name [-d <domid>]\n",
-		      domu_create, 2, 2),
+		      " Usage: create cfg_name [-d <domid>] [-p]\n",
+		      domu_create, 2, 3),
 	SHELL_CMD_ARG(destroy, NULL,
 		      " Destroy Xen domain\n"
 		      " Usage: destroy <domid>\n",
