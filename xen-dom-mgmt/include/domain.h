@@ -131,6 +131,8 @@ struct xen_domain_cfg {
 	void *image_info;
 
 	struct backend_configuration back_cfg;
+
+	bool f_paused:1; /**< Domain should remain paused after creation */
 };
 
 struct xen_domain_console {
