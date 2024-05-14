@@ -58,11 +58,11 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 	}
 
 	ret = domain_create(cfg, domid);
-	if (ret) {
+	if (ret < 0) {
 		return ret; /* domain_create should care about error logs */
 	}
 
-	return domain_post_create(cfg, domid);
+	return domain_post_create(cfg, ret);
 }
 
 int domu_destroy(const struct shell *shell, size_t argc, char **argv)

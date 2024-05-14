@@ -793,7 +793,11 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	++dom_num;
 	k_mutex_unlock(&dl_mutex);
 
-	return rc;
+	if (rc) {
+		return rc;
+	}
+
+	return domid;
 
 stop_domain_console:
 #ifdef CONFIG_XEN_CONSOLE_SRV

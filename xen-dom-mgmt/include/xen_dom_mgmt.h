@@ -19,7 +19,7 @@ extern "C" {
  *
  * @param domcfg The configuration for the new domain.
  * @param domid The ID of the new domain.
- * @return 0 on success, or an error code on failure.
+ * @return domid on success, or a negative error code on failure.
  */
 int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid);
 
