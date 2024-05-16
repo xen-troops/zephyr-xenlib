@@ -134,11 +134,19 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 		return ret; /* domain_create should care about error logs */
 	}
 
-	return domain_post_create(cfg, ret);
+	domid = ret;
+	ret = domain_post_create(cfg, domid);
+	if (ret) {
+		return ret;
+	}
+
+	shell_info(shell, "domain:%u created", domid);
+	return 0;
 }
 
 int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 {
+	int ret;
 	uint32_t domid = 0;
 
 	if (argc != 2)
@@ -150,7 +158,13 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	return domain_destroy(domid);
+	ret = domain_destroy(domid);
+	if (ret) {
+		return ret;
+	}
+
+	shell_info(shell, "domain:%u destroyed", domid);
+	return 0;
 }
 
 #ifdef CONFIG_XEN_CONSOLE_SRV
@@ -182,6 +196,7 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 int domu_pause(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
+	int ret;
 
 	if (argc != 2)
 		return -EINVAL;
@@ -192,12 +207,19 @@ int domu_pause(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	return domain_pause(domid);
+	ret = domain_pause(domid);
+	if (ret) {
+		return ret;
+	}
+
+	shell_info(shell, "domain:%u paused", domid);
+	return 0;
 }
 
 int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
+	int ret;
 
 	if (argc != 2)
 		return -EINVAL;
@@ -208,7 +230,13 @@ int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	return domain_unpause(domid);
+	ret = domain_unpause(domid);
+	if (ret) {
+		return ret;
+	}
+
+	shell_info(shell, "domain:%u unpaused", domid);
+	return 0;
 }
 
 int xen_config_list(const struct shell *shell, size_t argc, char **argv)
