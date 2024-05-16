@@ -877,6 +877,9 @@ int domain_pause(uint32_t domid)
 	}
 
 	rc = xen_domctl_pausedomain(domid);
+	if (rc) {
+		LOG_ERR("domain:%u pause failed (%d)", domid, rc);
+	}
 
 	return rc;
 }
@@ -884,6 +887,7 @@ int domain_pause(uint32_t domid)
 int domain_unpause(uint32_t domid)
 {
 	struct xen_domain *domain = NULL;
+	int rc;
 
 	domain = domid_to_domain(domid);
 	if (!domain) {
@@ -892,7 +896,12 @@ int domain_unpause(uint32_t domid)
 		return -EINVAL;
 	}
 
-	return xen_domctl_unpausedomain(domid);
+	rc = xen_domctl_unpausedomain(domid);
+	if (rc) {
+		LOG_ERR("domain:%u unpause failed (%d)", domid, rc);
+	}
+
+	return rc;
 }
 
 int domain_post_create(const struct xen_domain_cfg *domcfg, uint32_t domid)
