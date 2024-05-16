@@ -480,6 +480,7 @@ int xen_attach_domain_console(const struct shell *shell,
 		/* Actually, this should never happen */
 		shell_error(shell, "Shell is already attached to console");
 		k_mutex_unlock(&global_console_lock);
+		put_domain(domain);
 		return -EEXIST;
 	}
 	current_console = console;
@@ -500,6 +501,7 @@ int xen_attach_domain_console(const struct shell *shell,
 
 	shell_set_bypass(shell, console_shell_cb);
 
+	put_domain(domain);
 	return 0;
 }
 

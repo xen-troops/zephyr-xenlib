@@ -167,6 +167,7 @@ struct xen_domain {
 	int address_size;
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
+	int refcount;
 
 	/* TODO: domains can have more than one console */
 	struct xen_domain_console console;
@@ -175,7 +176,8 @@ struct xen_domain {
 	bool f_dom0less:1; /**< Indicates that domain was created by Xen itself */
 };
 
-struct xen_domain *domid_to_domain(uint32_t domid);
+struct xen_domain *get_domain(uint32_t domid);
+void put_domain(struct xen_domain *domain);
 
 #ifdef __cplusplus
 }

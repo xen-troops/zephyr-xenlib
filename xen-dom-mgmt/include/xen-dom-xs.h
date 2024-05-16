@@ -27,10 +27,10 @@ int xs_add_pvblock_xenstore(const struct pv_block_configuration *cfg, int domid)
 /**
  * Removes all XenStore backends for a specific domain.
  *
- * @param domid The ID of the domain.
+ * @param domain The Xen domain structure.
  * @return 0 on success, negative error code on failure.
  */
-int xs_remove_xenstore_backends(int domid);
+int xs_remove_xenstore_backends(struct xen_domain *domain);
 
 /**
  * Adds a PV network backend to the XenStore for a specific domain.

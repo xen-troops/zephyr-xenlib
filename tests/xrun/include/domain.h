@@ -117,6 +117,7 @@ struct xen_domain_console {
 struct xen_domain {
 };
 
-struct xen_domain *domid_to_domain(uint32_t domid);
+struct xen_domain *get_domain(uint32_t domid);
+void put_domain(struct xen_domain *domain);
 
 #endif /* XENLIB_XEN_DOMAIN_H */
