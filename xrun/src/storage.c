@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (c) 2023 EPAM Systems
+ * Copyright (c) 2024 EPAM Systems
  */
 #include <stdio.h>
 
 #include <zephyr/device.h>
 #include <zephyr/fs/fs.h>
-#include <zephyr/fs/littlefs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
