@@ -45,4 +45,15 @@ config XRUN_IRQS_MAX
 	  Sets the maximum number of the irqs configuration
 	  provided in the OCI spec.
 
+config XRUN_STORAGE_DMA_DEBOUNCE
+	int "Set debounce buffer for FS storage access in KB"
+	default 4
+	help
+	  Sets debounce buffer for FS storage access in KB which is required to
+	  enable DMA for storage devices. The xenlib may use DMA incompatible
+	  buffers for reading guest domain kernel binaries using forging memory,
+	  mapped in Dom0 address space. These buffers may not be contiguous and
+	  phys/dma address can't be obtained for this buffers.
+	  In such cases enables this option.
+
 endif # XRUN

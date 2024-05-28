@@ -13,6 +13,43 @@
 
 LOG_MODULE_REGISTER(storage);
 
+#if CONFIG_XRUN_STORAGE_DMA_DEBOUNCE > 0
+
+static uint8_t debounce_buf[KB(CONFIG_XRUN_STORAGE_DMA_DEBOUNCE)]
+			    __aligned(CONFIG_SDHC_BUFFER_ALIGNMENT) __nocache;
+static K_MUTEX_DEFINE(debounce_lock);
+
+static int xrun_file_read_debounce(struct fs_file_t *file, uint8_t *buf, size_t read_size)
+{
+	ssize_t read;
+	size_t count;
+	int ret = 0;
+
+	k_mutex_lock(&debounce_lock, K_FOREVER);
+
+	count = read_size;
+
+	while (count) {
+		read = MIN(count, sizeof(debounce_buf));
+
+		read = fs_read(file, debounce_buf, read);
+		if (read < 0) {
+			LOG_ERR("read failed (%zd)", read);
+			ret = read;
+			break;
+		}
+
+		memcpy(buf, debounce_buf, read);
+		LOG_DBG("file count %zd read %zd", count, read);
+		count -= read;
+		buf += read;
+	}
+
+	k_mutex_unlock(&debounce_lock);
+	return ret;
+}
+#endif /* CONFIG_XRUN_STORAGE_DMA_DEBOUNCE */
+
 ssize_t xrun_read_file(const char *fpath, char *buf,
 		       size_t size, int skip)
 {
@@ -45,7 +82,11 @@ ssize_t xrun_read_file(const char *fpath, char *buf,
 		}
 	}
 
+#if CONFIG_XRUN_STORAGE_DMA_DEBOUNCE > 0
+	rc = xrun_file_read_debounce(&file, buf, size);
+#else
 	rc = fs_read(&file, buf, size);
+#endif /* CONFIG_XRUN_STORAGE_DMA_DEBOUNCE */
 	if (rc < 0) {
 		LOG_ERR("FAIL: read %s: [rc:%ld]", fpath, rc);
 		goto out;
@@ -78,7 +119,7 @@ ssize_t xrun_get_file_size(const char *fpath)
 	}
 
 	/* Check if it's a file */
-	if (rc == 0 && dirent.type != FS_DIR_ENTRY_FILE) {
+	if (dirent.type != FS_DIR_ENTRY_FILE) {
 		LOG_ERR("File: %s not found", fpath);
 		return -ENOENT;
 	}
