@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Peter Bigot Consulting, LLC
+# Copyright (c) 2024 EPAM Systems
 # SPDX-License-Identifier: Apache-2.0
 
 mainmenu "Xen Libraries"
@@ -86,49 +86,6 @@ config VCH_PATH_MAXLEN
 	help
 	  The maximum XenStore path size that identify a separate vchannel.
 
-config XRUN
-	bool "Enable XRUN support"
-	select JSON_LIBRARY
-	help
-	  Enable xrun support which allows to run domains based on the runtime spec.
-
-config XRUN_JSON_SIZE_MAX
-	int "Maximum size of the json cni spec"
-	default 8192
-	depends on XRUN
-	help
-	  Sets the maximum size of the cni spec json that could
-	  be passed to xrun call.
-
-config XRUN_MAX_PATH_SIZE
-	int "Maximum length of file path to read from storage"
-	default 255
-	help
-	  Sets the maximum path size that xrun can read from storage.
-	  The default value is set to LFS_NAME_MAX which is default
-	  for littlefs configuration.
-
-config XRUN_DTDEVS_MAX
-	int "Maximum numbers of the provided dtdevs"
-	default 20
-	help
-	  Sets the maximum number of the dtdevs configuration
-	  provided in the OCI spec.
-
-config XRUN_IOMEMS_MAX
-	int "Maximum numbers of the provided iomems"
-	default 20
-	help
-	  Sets the maximum number of the iomems configuration
-	  provided in the OCI spec.
-
-config XRUN_IRQS_MAX
-	int "Maximum numbers of the provided irqs"
-	default 20
-	help
-	  Sets the maximum number of the irqs configuration
-	  provided in the OCI spec.
-
 config PFN_CHUNK_SIZE
 	int "Chunk size for memory mapping operations"
 	default 128
@@ -163,3 +120,5 @@ config XEN_DOM0LESS_BOOT
 	  xenstore will be initialized.
 
 	  This is EXPERIMENTAL and depends on work in Xen mainline.
+
+rsource "./xrun/Kconfig"
