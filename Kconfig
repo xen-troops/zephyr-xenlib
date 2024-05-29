@@ -20,7 +20,6 @@ config XEN_LIBFDT
 config PARTIAL_DEVICE_TREE_SIZE
 	int "Domain device tree size"
 	default 8192
-	depends on XEN_LIBFDT
 	help
 	  Maximum size of the domain device tree
 
@@ -39,6 +38,16 @@ config XEN_DOMCFG_SECTION
 	  This allows you to declare multiple domain configs with
 	  a DECL_CONFIG macro. Configs can be later accessed by
 	  their name.
+
+config XEN_DOMCFG_READ_PDT
+	bool "Enable reading of domain partial device-tree (PDT) binary"
+	default y
+	depends on XEN_DOMAIN_MANAGEMENT
+	help
+	  Enables reading of domain partial device-tree (PDT) binary by using
+	  callbacks in struct xen_domain_cfg.
+	  It also enables this feature in "xu create" shell command which will
+	  try to load PDT binary using struct xen_domain_cfg callbacks.
 
 config XEN_CONSOLE_SRV
 	bool "Enable Xen Console server"

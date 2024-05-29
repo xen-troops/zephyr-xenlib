@@ -16,6 +16,57 @@
 
 LOG_MODULE_REGISTER(xen_shell);
 
+#if defined(CONFIG_XEN_DOMCFG_READ_PDT)
+
+static uint8_t pfdt_read_buf[CONFIG_PARTIAL_DEVICE_TREE_SIZE] __aligned(8);
+
+static int xen_cmd_read_pfdt(struct xen_domain_cfg *domcfg)
+{
+	size_t pfdt_size;
+	int ret;
+
+	if (domcfg->dtb_start && domcfg->dtb_end) {
+		return 0;
+	}
+
+	if (!domcfg->image_dt_get_size && !domcfg->image_dt_read) {
+		LOG_DBG("PDT read callback not provided");
+		return 0;
+	}
+
+	LOG_INF("PDT not provided, attempt to read from storage");
+
+	ret = domcfg->image_dt_get_size(domcfg->image_info, &pfdt_size);
+	if (ret) {
+		LOG_ERR("PDT get size failed (%d)", ret);
+		return ret;
+	}
+
+	if (!pfdt_size) {
+		LOG_ERR("wrong PDT size");
+		return -ENOEXEC;
+	}
+
+	if (pfdt_size > sizeof(pfdt_read_buf)) {
+		LOG_ERR("PDT size is too big %zd", pfdt_size);
+		return -EFBIG;
+	}
+
+	ret = domcfg->image_dt_read(pfdt_read_buf, pfdt_size, 0, domcfg->image_info);
+	if (ret) {
+		LOG_ERR("PDT read failed (%d)", ret);
+		return ret;
+	}
+
+	LOG_DBG("PDT read magic:%08x", *(uint32_t *)pfdt_read_buf);
+
+	domcfg->dtb_start = pfdt_read_buf;
+	domcfg->dtb_end = pfdt_read_buf + pfdt_size;
+
+	return 0;
+}
+#endif /* CONFIG_XEN_DOMCFG_READ_PDT */
+
 uint32_t parse_domid(size_t argc, char **argv)
 {
 	/* first would be the cmd name, start from second */
@@ -70,6 +121,13 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 	}
 
 	parse_and_fill_flags(argc, argv, cfg);
+
+#if defined(CONFIG_XEN_DOMCFG_READ_PDT)
+	ret = xen_cmd_read_pfdt(cfg);
+	if (ret) {
+		return ret;
+	}
+#endif /* CONFIG_XEN_DOMCFG_READ_PDT */
 
 	ret = domain_create(cfg, domid);
 	if (ret < 0) {
