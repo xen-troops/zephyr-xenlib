@@ -53,6 +53,35 @@ typedef int (*load_image_bytes_t)(uint8_t *buf, size_t bufsize,
  */
 typedef ssize_t (*get_image_size_t)(void *image_info, uint64_t *size);
 
+/**
+ * @typedef image_dt_read_cb_t
+ * @brief Partial device-tree (PDT) binary read callback
+ *
+ * Function callback, that should load @ref bufsize domain's PDT image binary to given buffer.
+ * The xenlib will attempt to load PDT if @ref dtb_start is not provided.
+ *
+ * @param buf buffer, where bytes should be loaded
+ * @param bufsize number of bytes, that should be loaded
+ * @param read_offset number of bytes, that should be skipped from image start
+ * @param image_info private data, passed to callback
+ * @return 0 on success, negative errno on error
+ */
+typedef int (*image_dt_read_cb_t)(uint8_t *buf, size_t bufsize, uint64_t read_offset,
+				  void *image_info);
+
+/**
+ * @typedef image_dt_get_size_cb_t
+ * @brief Partial device-tree (PDT) binary get size callback
+ *
+ * Function callback, that should return domain's PDT image size in bytes.
+ * The xenlib will attempt to load PDT if @ref dtb_start is not provided.
+ *
+ * @param image_info private data, that can be passed to callback
+ * @param size output parameter, uint64_t pointer to result
+ * @return 0 on success, negative errno on error
+ */
+typedef int (*image_dt_get_size_cb_t)(void *image_info, size_t *size);
+
 struct pv_net_configuration {
 	bool configured;
 	int backend_domain_id;
@@ -124,6 +153,10 @@ struct xen_domain_cfg {
 	char *cmdline;
 
 	const char *dtb_start, *dtb_end;
+#if defined(CONFIG_XEN_DOMCFG_READ_PDT)
+	image_dt_read_cb_t image_dt_read;
+	image_dt_get_size_cb_t image_dt_get_size;
+#endif /* CONFIG_XEN_DOMCFG_READ_PDT */
 
 	load_image_bytes_t load_image_bytes;
 	get_image_size_t get_image_size;
