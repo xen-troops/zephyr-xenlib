@@ -102,19 +102,6 @@ uint64_t xenmem_populate_physmap(int domid,
 	return i;
 }
 
-#if defined(CONFIG_XEN_REGIONS)
-static void *get_region_space(uint64_t nr_pages)
-{
-	return xen_region_get_pages(nr_pages);
-}
-
-static int put_region_space(void *mapped_addr, uint64_t nr_pages)
-{
-	xen_region_put_pages(mapped_addr, nr_pages);
-	return 0;
-}
-#else /* CONFIG_XEN_REGIONS */
-
 static uint64_t region_space_remove(void *mapped_addr, uint64_t nr_pages)
 {
 	uint64_t base_pfn, i;
@@ -134,6 +121,19 @@ static uint64_t region_space_remove(void *mapped_addr, uint64_t nr_pages)
 
 	return nr_pages;
 }
+
+#if defined(CONFIG_XEN_REGIONS)
+static void *get_region_space(uint64_t nr_pages)
+{
+	return xen_region_get_pages(nr_pages);
+}
+
+static int put_region_space(void *mapped_addr, uint64_t nr_pages)
+{
+	xen_region_put_pages(mapped_addr, nr_pages);
+	return 0;
+}
+#else /* CONFIG_XEN_REGIONS */
 
 static void *get_region_space(uint64_t nr_pages)
 {
@@ -226,20 +226,10 @@ int xenmem_map_region(int domid, uint64_t nr_pages, uint64_t base_gfn,
 	return 0;
 
 err_out:
-	/*
-	 * If CONFIG_XEN_REGIONS is not defined we allocate memory from heap
-	 * and remove it from the DOMID_SELF physical map. So, unlike to the
-	 * extended regions, which are not requested from Zephyr physmap, this
-	 * memory should be populated back on error or unmap. For this case
-	 * we split region deallocation to 2 steps to handle case when only
-	 * first N pages were added to the external domain, so we need only
-	 * nr_added_pfns to be populated back to the DOMID_SELF.
-	 */
-#if !defined(CONFIG_XEN_REGIONS)
 	if (region_space_remove(mapped_addr, nr_added_pfns) != nr_added_pfns) {
 		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
 	}
-#endif
+
 	ret = put_region_space(*mapped_addr, nr_pages);
 	if (ret) {
 		LOG_ERR("Unable to free mapped space: %d", ret);
@@ -250,7 +240,6 @@ err_out:
 
 int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 {
-#if !defined(CONFIG_XEN_REGIONS)
 	uint64_t nr_removed_pfns;
 
 	nr_removed_pfns = region_space_remove(mapped_addr, nr_pages);
@@ -259,7 +248,8 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
 		return -EFAULT;
 	}
-#else
+
+#if defined(CONFIG_XEN_REGIONS)
 	xen_region_unmap(mapped_addr, nr_pages);
 #endif
 	return put_region_space(mapped_addr, nr_pages);
