@@ -79,11 +79,6 @@ config XENSTORE_TREE_TRAVERSE_DEPTH
 	  Sets the maximum xs traverse depth to avoid stack overflow
 	  in case of deeply nested XS trees.
 
-config XRUN_SHELL_CMDS
-	bool "Enable XRUN shell commands"
-	help
-	  Enable set of XRUN shell commands to manage xrun library calls.
-
 config XEN_VCH
 	bool "Enable Xen vchannels support"
 	help
@@ -129,5 +124,3 @@ config XEN_DOM0LESS_BOOT
 	  xenstore will be initialized.
 
 	  This is EXPERIMENTAL and depends on work in Xen mainline.
-
-rsource "./xrun/Kconfig"
