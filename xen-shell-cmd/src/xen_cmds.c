@@ -16,6 +16,8 @@
 
 LOG_MODULE_REGISTER(xen_shell);
 
+static struct xen_domain_cfg domcfg_tmp;
+
 #if defined(CONFIG_XEN_DOMCFG_READ_PDT)
 
 static uint8_t pfdt_read_buf[CONFIG_PARTIAL_DEVICE_TREE_SIZE] __aligned(8);
@@ -119,23 +121,25 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 		shell_error(shell, "Config %s not found", name);
 		return -EINVAL;
 	}
+	/* Made a copy of domain cfg to avoid modification of original cfg by below code */
+	domcfg_tmp = *cfg;
 
-	parse_and_fill_flags(argc, argv, cfg);
+	parse_and_fill_flags(argc, argv, &domcfg_tmp);
 
 #if defined(CONFIG_XEN_DOMCFG_READ_PDT)
-	ret = xen_cmd_read_pfdt(cfg);
+	ret = xen_cmd_read_pfdt(&domcfg_tmp);
 	if (ret) {
 		return ret;
 	}
 #endif /* CONFIG_XEN_DOMCFG_READ_PDT */
 
-	ret = domain_create(cfg, domid);
+	ret = domain_create(&domcfg_tmp, domid);
 	if (ret < 0) {
 		return ret; /* domain_create should care about error logs */
 	}
 
 	domid = ret;
-	ret = domain_post_create(cfg, domid);
+	ret = domain_post_create(&domcfg_tmp, domid);
 	if (ret) {
 		return ret;
 	}
