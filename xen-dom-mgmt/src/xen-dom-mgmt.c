@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/dom0/sysctl.h>
@@ -47,6 +50,7 @@ static int dom_num = 0;
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 K_MUTEX_DEFINE(dl_mutex);
+K_MUTEX_DEFINE(create_mutex);
 
 static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 				    struct xen_arch_domainconfig *arch_cfg)
@@ -678,6 +682,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domain *domain;
 	struct modules_address modules = {0};
+	char *name;
 
 	if (dom_num >= CONFIG_DOM_MAX) {
 		LOG_ERR("Runtime exceeds maximum number of domains");
@@ -700,8 +705,14 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 	memset(domain, 0, sizeof(*domain));
 	domain->domid = domid;
+	/* Fallback to name if domain_name is not set */
+	if (strnlen(domcfg->domain_name, CONTAINER_NAME_SIZE) > 0) {
+		name = domcfg->domain_name;
+	} else {
+		name = domcfg->name;
+	}
 
-	snprintf(domain->name, CONTAINER_NAME_SIZE, "%s", domcfg->name);
+	snprintf(domain->name, CONTAINER_NAME_SIZE, "%s", name);
 	rc = xen_domctl_max_vcpus(domid, domcfg->max_vcpus);
 	if (rc) {
 		LOG_ERR("Failed to set max vcpus for domain#%u (rc=%d)", domid, rc);
@@ -792,7 +803,17 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 #endif
 
+	k_mutex_lock(&create_mutex, K_FOREVER);
+	if (find_domain_by_name(name) != 0) {
+		rc = -EEXIST;
+		LOG_ERR("Domain with name %s already exists", name);
+		k_mutex_unlock(&create_mutex);
+		goto stop_domain_console;
+	}
+
 	rc = xs_initialize_xenstore(domid, domain);
+	k_mutex_unlock(&create_mutex);
+
 	if (rc) {
 		goto stop_domain_console;
 	}
