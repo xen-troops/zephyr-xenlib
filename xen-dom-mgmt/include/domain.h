@@ -123,6 +123,7 @@ struct backends_state {
 
 struct xen_domain_cfg {
 	char name[CONTAINER_NAME_SIZE];
+	char domain_name[CONTAINER_NAME_SIZE];
 	const char **machine_dt_compat;
 	uint32_t nr_machine_dt_compat;
 	uint64_t mem_kb;
