@@ -4,28 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/init.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
-#include <zephyr/xen/generic.h>
 #include <zephyr/xen/hvm.h>
-#include <zephyr/xen/memory.h>
-#include <zephyr/xen/public/hvm/hvm_op.h>
-#include <zephyr/xen/public/hvm/params.h>
-#include <zephyr/xen/public/domctl.h>
-#include <zephyr/xen/public/xen.h>
-
-#include <zephyr/xen/public/io/console.h>
-#include <zephyr/xen/events.h>
 #include <zephyr/logging/log.h>
 
-#include <zephyr/init.h>
-#include <zephyr/kernel.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-
-#include <domain.h>
 #include <xen-dom-fdt.h>
 #include <xen-dom-xs.h>
 #include <xen_dom_mgmt.h>
@@ -33,7 +16,6 @@
 #include <uimage.h>
 #include <zimage.h>
 
-#include <xenstore_srv.h>
 #ifdef CONFIG_XEN_CONSOLE_SRV
 #include <xen_console.h>
 #endif
