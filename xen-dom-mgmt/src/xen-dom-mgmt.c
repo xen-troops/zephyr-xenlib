@@ -13,6 +13,7 @@
 #include <zephyr/xen/public/hvm/hvm_op.h>
 #include <zephyr/xen/public/hvm/params.h>
 #include <zephyr/xen/public/domctl.h>
+#include <zephyr/xen/dom0/sysctl.h>
 #include <zephyr/xen/public/xen.h>
 
 #include <zephyr/xen/public/io/console.h>
@@ -64,6 +65,7 @@ static int dom_num = 0;
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 K_MUTEX_DEFINE(dl_mutex);
+K_MUTEX_DEFINE(create_mutex);
 
 static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 				    struct xen_arch_domainconfig *arch_cfg)
@@ -638,6 +640,44 @@ struct xen_domain_cfg *domain_find_config(const char *name)
 	return NULL;
 }
 
+int get_domain_name(unsigned short domain_id, char *name, int len)
+{
+#ifdef CONFIG_XEN_STORE_SRV
+	char path[sizeof("/local/domain/32768/name")];
+
+	snprintf(path, sizeof(path), "/local/domain/%u/name", domain_id);
+	return xss_read(path, name, len);
+#else
+	return -EINVAL;
+#endif
+}
+
+uint32_t find_domain_by_name(char *arg)
+{
+	char domname[CONTAINER_NAME_SIZE];
+	struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
+	uint32_t domid = 0;
+	int i, ret;
+
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	if (ret < 0) {
+		goto out;
+	}
+
+	for (i = 0; i < ret; i++) {
+		if (!get_domain_name(infos[i].domain, domname,
+					    CONTAINER_NAME_SIZE)) {
+			if (strcmp(domname, arg) == 0) {
+				domid = infos[i].domain;
+				break;
+			}
+		}
+	}
+
+out:
+	return domid;
+}
+
 __weak int domain_get_user_cfg_count(void)
 {
 	return 0;
@@ -770,7 +810,17 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	}
 #endif
 
+	k_mutex_lock(&create_mutex, K_FOREVER);
+	if (find_domain_by_name(domcfg->name) != 0) {
+		rc = -EEXIST;
+		LOG_ERR("Domain with name %s already exists", domcfg->name);
+		k_mutex_unlock(&create_mutex);
+		goto stop_domain_console;
+	}
+
 	rc = xs_initialize_xenstore(domid, domain);
+	k_mutex_unlock(&create_mutex);
+
 	if (rc) {
 		goto stop_domain_console;
 	}

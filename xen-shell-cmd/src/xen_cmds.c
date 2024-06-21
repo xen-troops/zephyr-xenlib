@@ -6,8 +6,10 @@
 
 #include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/xen/dom0/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include <xen_dom_mgmt.h>
 #ifdef CONFIG_XEN_CONSOLE_SRV
@@ -15,6 +17,7 @@
 #endif
 
 LOG_MODULE_REGISTER(xen_shell);
+static struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
 
 #if defined(CONFIG_XEN_DOMCFG_READ_PDT)
 
@@ -96,6 +99,28 @@ void parse_and_fill_flags(size_t argc, char **argv, struct xen_domain_cfg *cfg)
 	}
 }
 
+static bool is_all_numbers(char *str)
+{
+	int i;
+
+	for (i = 0; str[i] != '\0'; i++) {
+		if (!isdigit(str[i])) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static uint32_t parse_domid_or_name(char *arg)
+{
+	if (is_all_numbers(arg)) {
+		return atoi(arg);
+	}
+
+	return find_domain_by_name(arg);
+}
+
 static int domu_create(const struct shell *shell, int argc, char **argv)
 {
 	int ret;
@@ -152,7 +177,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	if (argc != 2)
 		return -EINVAL;
 
-	domid = atoi(argv[1]);
+	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
 		shell_error(shell, "Invalid domid passed to destroy cmd\n");
 		return -EINVAL;
@@ -176,7 +201,7 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 	if (argc != 2)
 		return -EINVAL;
 
-	domid = atoi(argv[1]);
+	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
 		shell_error(shell, "Invalid domid passed to create cmd\n");
 		return -EINVAL;
@@ -201,7 +226,7 @@ int domu_pause(const struct shell *shell, size_t argc, char **argv)
 	if (argc != 2)
 		return -EINVAL;
 
-	domid = atoi(argv[1]);
+	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
 		shell_error(shell, "Invalid domid passed to destroy cmd\n");
 		return -EINVAL;
@@ -224,7 +249,7 @@ int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 	if (argc != 2)
 		return -EINVAL;
 
-	domid = atoi(argv[1]);
+	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
 		shell_error(shell, "Invalid domid passed to unpause cmd\n");
 		return -EINVAL;
@@ -260,6 +285,41 @@ int xen_config_list(const struct shell *shell, size_t argc, char **argv)
 
 	return 0;
 }
+static int domain_list(const struct shell *shell, size_t argc, char **argv)
+{
+	int i, ret;
+	char domname[CONTAINER_NAME_SIZE];
+	unsigned long memkb;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	if (ret < 0) {
+		goto out;
+	}
+	shell_fprintf(shell, SHELL_NORMAL,
+			"Name                                        ID   Mem VCPUs\tState\tTime(s)\n");
+	for (i = 0; i < ret; i++) {
+		if (get_domain_name(infos[i].domain, domname, CONTAINER_NAME_SIZE)) {
+			strcpy(domname, "(NULL)");
+		}
+		memkb = infos[i].tot_pages * XEN_PAGE_SIZE / 1024;
+		shell_fprintf(shell, SHELL_NORMAL, "%-40s %5d %5lu %5d      %c%c%c%c%c  %8.1f\n",
+						domname,
+						infos[i].domain,
+						(unsigned long) (memkb / 1024),
+						infos[i].nr_online_vcpus,
+						infos[i].flags & XEN_DOMINF_running ? 'r' : '-',
+						infos[i].flags & XEN_DOMINF_blocked ? 'b' : '-',
+						infos[i].flags & XEN_DOMINF_paused ? 'p' : '-',
+						infos[i].flags & XEN_DOMINF_shutdown ? 's' : '-',
+						infos[i].flags & XEN_DOMINF_dying ? 'd' : '-',
+						((double)infos[i].cpu_time / 1e9));
+	}
+out:
+	return ret;
+}
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
@@ -269,15 +329,15 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      domu_create, 2, 3),
 	SHELL_CMD_ARG(destroy, NULL,
 		      " Destroy Xen domain\n"
-		      " Usage: destroy <domid>\n",
+		      " Usage: destroy <domid|name>\n",
 		      domu_destroy, 2, 0),
 	SHELL_CMD_ARG(pause, NULL,
 		      " Pause Xen domain\n"
-		      " Usage: pause <domid>\n",
+		      " Usage: pause <domid|name>\n",
 		      domu_pause, 2, 0),
 	SHELL_CMD_ARG(unpause, NULL,
 		      " Unpause Xen domain\n"
-		      " Usage: unpause <domid>\n",
+		      " Usage: unpause <domid|name>\n",
 		      domu_unpause, 2, 0),
 	SHELL_CMD_ARG(config_list, NULL,
 		      " List available domain configurations\n",
@@ -286,9 +346,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_CMD_ARG(console, NULL,
 		      " Attach to a domain console.\n"
 		      " Press CTRL+] to detach from console\n"
-		      " Usage: console <domid>\n",
+		      " Usage: console <domid|name>\n",
 		      domu_console_attach, 2, 0),
 #endif
+	SHELL_CMD_ARG(list, NULL,
+		      " List all Xen domains\n"
+			  " Usage: list\n",
+		      domain_list, 1, 0),
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2, 0);
