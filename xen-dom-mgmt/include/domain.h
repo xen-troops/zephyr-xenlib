@@ -132,6 +132,7 @@ struct xen_domain_cfg {
 	uint32_t max_evtchns;
 	int32_t gnt_frames;
 	int32_t max_maptrack_frames;
+	uint32_t ssidref; /**< XSM security labels id */
 
 	/* ARM arch related */
 	uint8_t gic_version;
