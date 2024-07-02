@@ -111,3 +111,39 @@ config XEN_DOMAIN_MANAGEMENT
 config XEN_CONSOLE_SRV
 ```
 For more information on the configuration options, please refer to the `Kconfig` file.
+
+## Xen Security Modules (XSM) - FLASK support (experimental)
+
+The XSM policy is completely user defined, and any IDs associated with policy
+elements (like user, role and type) are auto-generated at Xen build time.
+
+For XSM to work properly the domU need to be marked with security label
+in their configuration. Without this the domains will be classified “unlabeled”.
+
+Example line from a domU configuration (xl.cfg):
+```
+seclabel='system_u:system_r:domU_t'
+```
+
+In Linux world, the pretty complex set of Xen tools is responsible for
+converting from above security label string into numeric SSID value used by
+Xen internally. For example, below conversion happens with XSM domain security
+label, specified in very simplified form:
+```
+    seclabel='system_u:system_r:domU_t' => domU => SECINITSID_DOMU => 12
+```
+
+Hence in Zephyr such tools are absent the only available option right now is
+to get SSID values from auto-generated Xen xen/xen/xsm/flask/include/flask.h
+header.
+
+The zephyr-xenlib allows to specify XSM security labels SSID in `ssidref" field
+of the struct xen_domain_cfg.
+
+Example of labelig of domU with `domU_t` type:
+```
+struct xen_domain_cfg domd_cfg = {
+	...
+	.ssidref = 12,
+};
+```
