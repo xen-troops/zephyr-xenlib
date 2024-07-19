@@ -596,7 +596,7 @@ int xrun_run(const char *bundle, int console_socket, const char *container_id)
 	}
 
 	ret = domain_create(&domcfg, container->domid);
-	if (ret) {
+	if (ret < 0) {
 		k_mutex_unlock(&container_run_lock);
 		goto err_config;
 	}
