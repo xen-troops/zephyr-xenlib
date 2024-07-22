@@ -47,7 +47,7 @@ config XRUN_IRQS_MAX
 
 config XRUN_STORAGE_DMA_DEBOUNCE
 	int "Set debounce buffer for FS storage access in KB"
-	default 4
+	default 0
 	help
 	  Sets debounce buffer for FS storage access in KB which is required to
 	  enable DMA for storage devices. The xenlib may use DMA incompatible
