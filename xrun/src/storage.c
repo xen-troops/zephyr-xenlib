@@ -19,11 +19,11 @@ static uint8_t debounce_buf[KB(CONFIG_XRUN_STORAGE_DMA_DEBOUNCE)]
 			    __aligned(CONFIG_SDHC_BUFFER_ALIGNMENT) __nocache;
 static K_MUTEX_DEFINE(debounce_lock);
 
-static int xrun_file_read_debounce(struct fs_file_t *file, uint8_t *buf, size_t read_size)
+static ssize_t xrun_file_read_debounce(struct fs_file_t *file, uint8_t *buf, size_t read_size)
 {
 	ssize_t read;
 	size_t count;
-	int ret = 0;
+	ssize_t ret = 0;
 
 	k_mutex_lock(&debounce_lock, K_FOREVER);
 
@@ -43,10 +43,14 @@ static int xrun_file_read_debounce(struct fs_file_t *file, uint8_t *buf, size_t 
 		LOG_DBG("file count %zd read %zd", count, read);
 		count -= read;
 		buf += read;
+		if (count && read < sizeof(debounce_buf)) {
+			ret = read_size - count;
+			break;
+		}
 	}
 
 	k_mutex_unlock(&debounce_lock);
-	return ret;
+	return count ? ret : read_size;
 }
 #endif /* CONFIG_XRUN_STORAGE_DMA_DEBOUNCE */
 
