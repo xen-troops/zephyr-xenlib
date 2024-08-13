@@ -1006,7 +1006,7 @@ static int dom0less_get_next_domain(uint32_t domid_start, struct xen_domctl_getd
 {
 	int i, rc;
 
-	__ASSERT_NO_MSG(infos);
+	__ASSERT_NO_MSG(info);
 
 	for (i = domid_start; i < CONFIG_DOM_MAX; i++) {
 		rc = xen_domctl_getdomaininfo(i, info);
