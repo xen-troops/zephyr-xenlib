@@ -2,7 +2,7 @@
 
 This is a library for Zephyr OS that provides a set of APIs to interact with Xen hypervisor.
 
-![Xen Project Logo](https://downloads.xenproject.org/Branding/Logos/Green+Black/xen_project_logo_dualcolor_165x69.png)
+![Xen Project Logo](https://downloads.xenproject.org/Branding/Logos/Metallic/xen_project_logo_165x67.png)
 
 Xen is a free and open-source type-1 hypervisor, providing services that allow multiple computer operating systems to execute on the same computer hardware concurrently.
 
