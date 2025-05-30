@@ -101,6 +101,10 @@ static void console_feed_int_ring(struct xen_domain_console *console, char ch)
 		console->lost_chars++;
 		console->int_cons++;
 	}
+
+	if (console->on_feed_cb) {
+		console->on_feed_cb(ch, console->on_feed_cb_data);
+	}
 }
 
 #ifdef CONFIG_XEN_SHELL
@@ -227,6 +231,8 @@ static int xen_init_domain_console(struct xen_domain *domain)
 	}
 	console->int_prod = 0;
 	console->int_cons = 0;
+	console->on_feed_cb = NULL;
+	console->on_feed_cb_data = NULL;
 
 	/* If we are attaching to a console for a second time, we need
 	 * to join the previous thread. We need to initialize this
@@ -506,3 +512,24 @@ int xen_attach_domain_console(const struct shell *shell,
 }
 
 #endif /* CONFIG_XEN_SHELL */
+
+int set_console_feed_cb(struct xen_domain *domain, on_console_feed_cb_t cb, void *cb_data)
+{
+	struct xen_domain_console *console;
+
+	if (!domain) {
+		LOG_ERR("No domain passed to %s", __func__);
+		return -ESRCH;
+	}
+
+	console = &domain->console;
+
+	k_mutex_lock(&console->lock, K_FOREVER);
+
+	console->on_feed_cb = cb;
+	console->on_feed_cb_data = cb_data;
+
+	k_mutex_unlock(&console->lock);
+
+	return 0;
+}
