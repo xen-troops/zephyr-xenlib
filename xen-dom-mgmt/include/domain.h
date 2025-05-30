@@ -82,6 +82,15 @@ typedef int (*image_dt_read_cb_t)(uint8_t *buf, size_t bufsize, uint64_t read_of
  */
 typedef int (*image_dt_get_size_cb_t)(void *image_info, size_t *size);
 
+/**
+ * @typedef on_console_feed_cb_t
+ * @brief Function callback, that is called when console receives a character.
+ *
+ * @param ch character received from console
+ * @param cb_data private data, passed to callback
+ */
+typedef void (*on_console_feed_cb_t)(char ch, void *cb_data);
+
 struct pv_net_configuration {
 	bool configured;
 	int backend_domain_id;
@@ -192,6 +201,8 @@ struct xen_domain_console {
 	size_t int_prod;
 	size_t int_cons;
 	size_t lost_chars;
+	on_console_feed_cb_t on_feed_cb;
+	void *on_feed_cb_data;
 };
 
 struct xen_domain {

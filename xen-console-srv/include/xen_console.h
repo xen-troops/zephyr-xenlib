@@ -42,6 +42,19 @@ int xen_stop_domain_console(struct xen_domain *domain);
 int xen_attach_domain_console(const struct shell *shell,
 			      struct xen_domain *domain);
 
+/**
+ * Sets the console feed cb object.
+ *
+ * @param domain - domain, where console feed cb will be set
+ *
+ * @param cb - callback function to be called on console feed
+ *
+ * @param cb_data - data to be passed to the callback function
+ *
+ * @return - zero on success, negative errno on failure
+ */
+int set_console_feed_cb(struct xen_domain *domain, on_console_feed_cb_t cb, void *cb_data);
+
 #ifdef __cplusplus
 }
 #endif
