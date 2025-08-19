@@ -242,6 +242,7 @@ int vch_connect(domid_t domain, const char *path, struct vch_handle *h)
 	evtchn_port_t remote_port;
 	char xs_key_scratch[MAX_XS_KEY_LEN] = { 0 };
 	struct gnttab_map_grant_ref map;
+	struct gnttab_unmap_grant_ref unmap;
 
 	if (!h || !path) {
 		return -EINVAL;
@@ -314,6 +315,7 @@ int vch_connect(domid_t domain, const char *path, struct vch_handle *h)
 	h->read = &h->ring->right;
 	h->write = &h->ring->left;
 	h->gref = ring_gref;
+	h->grant_handle = map.handle;
 	h->ring->cli_live = CLIENT_CONNECTED;
 	h->ring->srv_notify = VCHAN_NOTIFY_WRITE;
 	rc = unmask_event_channel(h->evtch);
@@ -329,7 +331,9 @@ int vch_connect(domid_t domain, const char *path, struct vch_handle *h)
 	return 0;
 
 free_gnt:
-	gnttab_unmap_refs(&map, 1);
+	unmap.host_addr = xen_to_phys(h->ring);
+	unmap.handle = map.handle;
+	gnttab_unmap_refs(&unmap, 1);
 	gnttab_put_page(h->ring);
 free_evtch:
 	unbind_event_channel(h->evtch);
@@ -339,7 +343,7 @@ free_evtch:
 
 void vch_close(struct vch_handle *h)
 {
-	struct gnttab_map_grant_ref map;
+	struct gnttab_unmap_grant_ref unmap;
 
 	if (!h) {
 		return;
@@ -355,10 +359,9 @@ void vch_close(struct vch_handle *h)
 		gnttab_end_access(h->gref);
 		k_free(h->ring);
 	} else {
-		map.host_addr = xen_to_phys(h->ring);
-		map.ref = h->gref;
-		map.flags = GNTMAP_host_map;
-		gnttab_unmap_refs(&map, 1);
+		unmap.host_addr = xen_to_phys(h->ring);
+		unmap.handle = h->grant_handle; 
+		gnttab_unmap_refs(&unmap, 1);
 		gnttab_put_page(h->ring);
 	}
 	memset(h, 0, sizeof(*h));

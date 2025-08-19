@@ -22,6 +22,7 @@ extern "C" {
 struct vch_handle {
 	evtchn_port_t evtch;
 	grant_ref_t gref;
+	grant_handle_t grant_handle;
 	bool blocking;
 	struct k_sem sem;
 	bool is_server;
