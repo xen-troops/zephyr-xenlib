@@ -18,6 +18,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/barrier.h>
 
+#include <xenstore_common.h>
 #include <mem-mgmt.h>
 #include "domain.h"
 #include "xen/public/io/xs_wire.h"
@@ -100,6 +101,26 @@ static void send_errno(struct xenstore *xenstore, uint32_t id, int err);
 
 static void cleanup_domain_watches(struct xen_domain *domain);
 
+static int ring_write(struct xenstore *xenstore, void *data, size_t len)
+{
+	int ret;
+
+	ret = xenstore_ring_write(xenstore->domint, data, len, false);
+	notify_evtchn(xenstore->local_evtchn);
+
+	return ret;
+}
+
+static int ring_read(struct xenstore *xenstore, void *data, size_t len)
+{
+	int ret;
+
+	ret = xenstore_ring_read(xenstore->domint, data, len, false);
+	notify_evtchn(xenstore->local_evtchn);
+
+	return ret;
+}
+
 /* Allocate one stack for external reader thread */
 static int get_stack_idx(void)
 {
@@ -155,35 +176,10 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 	return NULL;
 }
 
-static bool is_abs_path(const char *path)
-{
-	if (!path) {
-		return false;
-	}
-
-	return path[0] == '/';
-}
-
-static bool is_root_path(const char *path)
-{
-	return (is_abs_path(path) && (strlen(path) == 1));
-}
-
-/*
- * Returns the size of string including terminating NULL symbol.
- */
-static inline size_t str_byte_size(const char *str)
-{
-	if (!str) {
-		return 0;
-	}
-
-	return strlen(str) + 1;
-}
 
 static int construct_path(char *payload, uint32_t domid, char **path)
 {
-	size_t path_len = str_byte_size(payload);
+	size_t path_len = xenstore_str_byte_size(payload);
 
 	if (path_len > XENSTORE_ABS_PATH_MAX) {
 		LOG_ERR("Invalid path len (path len = %zu, max = %d)",
@@ -197,7 +193,7 @@ static int construct_path(char *payload, uint32_t domid, char **path)
 		return -ENOMEM;
 	}
 
-	if (is_abs_path(payload)) {
+	if (xenstore_is_abs_path(payload)) {
 		memcpy(*path, payload, path_len);
 	} else {
 		snprintf(*path, path_len + XENSTORE_MAX_LOCALPATH_LEN,
@@ -264,7 +260,7 @@ static struct xs_entry *key_to_entry(const char *key)
 		return NULL;
 	}
 
-	if (is_root_path(key)) {
+	if (xenstore_is_root_path(key)) {
 		return &root_xenstore;
 	}
 
@@ -318,66 +314,6 @@ static struct xs_entry *key_to_entry_check_perm(const char *key, uint32_t domid,
 	}
 
 	return NULL;
-}
-
-static bool check_indexes(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod)
-{
-	return ((prod - cons) > XENSTORE_RING_SIZE);
-}
-
-static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
-			       size_t *len)
-{
-	size_t delta = prod - cons;
-	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(cons);
-
-	if (delta < *len) {
-		*len = delta;
-	}
-
-	return MASK_XENSTORE_IDX(cons);
-}
-
-static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
-				size_t *len)
-{
-	size_t free_space = XENSTORE_RING_SIZE - (prod - cons);
-
-	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(prod);
-	if (free_space < *len) {
-		*len = free_space;
-	}
-
-	return MASK_XENSTORE_IDX(prod);
-}
-
-static int ring_write(struct xenstore *xenstore, const void *data, size_t len)
-{
-	size_t avail;
-	void *dest;
-	struct xenstore_domain_interface *intf = xenstore->domint;
-	XENSTORE_RING_IDX cons, prod;
-
-	cons = intf->rsp_cons;
-	prod = intf->rsp_prod;
-	z_barrier_dmem_fence_full();
-
-	if (check_indexes(cons, prod)) {
-		return -EINVAL;
-	}
-
-	dest = intf->rsp + get_output_offset(cons, prod, &avail);
-	if (avail < len) {
-		len = avail;
-	}
-
-	memcpy(dest, data, len);
-	z_barrier_dmem_fence_full();
-	intf->rsp_prod += len;
-
-	notify_evtchn(xenstore->local_evtchn);
-
-	return len;
 }
 
 static void invalidate_client(struct xenstore *xenstore, const char *reason, int err)
@@ -494,7 +430,7 @@ static void send_reply_sz(struct xenstore *xenstore, uint32_t req_id,
 static void send_reply(struct xenstore *xenstore, uint32_t id,
 		       uint32_t msg_type, const char *payload)
 {
-	send_reply_sz(xenstore, id, msg_type, payload, str_byte_size(payload));
+	send_reply_sz(xenstore, id, msg_type, payload, xenstore_str_byte_size(payload));
 }
 
 static void send_reply_read(struct xenstore *xenstore, uint32_t id,
@@ -552,7 +488,7 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 
 	/* Calculate total length of dirs child node names */
 	SYS_DLIST_FOR_EACH_CONTAINER(&entry->child_list, iter, node) {
-		reply_sz += str_byte_size(iter->key);
+		reply_sz += xenstore_str_byte_size(iter->key);
 	}
 
 	dir_list = k_malloc(reply_sz);
@@ -565,7 +501,7 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 
 	reply_sz = 0;
 	SYS_DLIST_FOR_EACH_CONTAINER(&entry->child_list, iter, node) {
-		dir_name_len = str_byte_size(iter->key);
+		dir_name_len = xenstore_str_byte_size(iter->key);
 		memcpy(dir_list + reply_sz, iter->key, dir_name_len);
 		reply_sz += dir_name_len;
 	}
@@ -837,10 +773,10 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 	struct xs_entry *iter = NULL, *insert_entry = NULL, *parent_entry = NULL;
 	char *path;
 	char *tok, *tok_state, *new_value;
-	size_t data_len = str_byte_size(data);
+	size_t data_len = xenstore_str_byte_size(data);
 	size_t namelen;
 
-	path = k_malloc(str_byte_size(const_path));
+	path = k_malloc(xenstore_str_byte_size(const_path));
 	if (!path) {
 		LOG_ERR("Failed to allocate memory for path\n");
 		return -ENOMEM;
@@ -958,7 +894,7 @@ static void notify_watchers(const char *path, uint32_t caller_domid)
 			goto pentry_fail;
 		}
 
-		pentry->key = k_malloc(str_byte_size(path));
+		pentry->key = k_malloc(xenstore_str_byte_size(path));
 		if (!pentry->key) {
 			goto pkey_fail;
 		}
@@ -1236,7 +1172,7 @@ static void _handle_write(struct xenstore *xenstore, uint32_t id,
 	int rc = 0;
 	char *path;
 	char *data = NULL;
-	size_t path_len = str_byte_size(payload);
+	size_t path_len = xenstore_str_byte_size(payload);
 	struct xen_domain *domain = xenstore->domain;
 
 	if (len < path_len) {
@@ -1540,7 +1476,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	struct watch_entry *wentry;
 	struct pending_watch_event_entry *pentry;
 	size_t path_len = 0, full_plen;
-	bool path_is_relative = !is_abs_path(payload);
+	bool path_is_relative = !xenstore_is_abs_path(payload);
 	int rc;
 	struct xen_domain *domain = xenstore->domain;
 
@@ -1557,7 +1493,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	if (rc) {
 		goto path_fail;
 	}
-	full_plen = str_byte_size(path);
+	full_plen = xenstore_str_byte_size(path);
 
 	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
@@ -1782,35 +1718,6 @@ const struct message_handle message_handle_list[XS_TYPE_COUNT] = { [XS_CONTROL] 
 					    [XS_SET_TARGET] = { NULL },
 					    [XS_RESET_WATCHES] = { handle_reset_watches },
 					    [XS_DIRECTORY_PART] = { NULL } };
-
-static int ring_read(struct xenstore *xenstore, void *data, size_t len)
-{
-	size_t avail;
-	const void *src;
-	struct xenstore_domain_interface *intf = xenstore->domint;
-	XENSTORE_RING_IDX cons, prod;
-
-	cons = intf->req_cons;
-	prod = intf->req_prod;
-	z_barrier_dmem_fence_full();
-
-	if (check_indexes(cons, prod)) {
-		return -EIO;
-	}
-
-	src = intf->req + get_input_offset(cons, prod, &avail);
-	if (avail < len) {
-		len = avail;
-	}
-
-	memcpy(data, src, len);
-	z_barrier_dmem_fence_full();
-	intf->req_cons += len;
-
-	notify_evtchn(xenstore->local_evtchn);
-
-	return len;
-}
 
 static void process_message(struct xenstore *xenstore)
 {
