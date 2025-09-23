@@ -9,9 +9,9 @@
 #define XENLIB_VCH_H
 
 #include <zephyr/xen/generic.h>
-#include <zephyr/xen/public/event_channel.h>
-#include <zephyr/xen/public/grant_table.h>
-#include <zephyr/xen/public/xen.h>
+#include <xen/public/event_channel.h>
+#include <xen/public/grant_table.h>
+#include <xen/public/xen.h>
 
 #include "xen/public/io/libxenvchan.h"
 
