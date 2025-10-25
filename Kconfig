@@ -33,6 +33,13 @@ config XEN_STORE_CLI
 	  state via XenStore.
 
 
+config XEN_STORE_CLI_SHELL_CMDS
+	depends on SHELL
+	depends on XEN_STORE_CLI
+	bool "Enable XenStore cleint shell"
+	help
+	  Enable shell for XenStore client.
+
 if XEN_STORE_CLI
 
 config XEN_STORE_CLI_WORKQ_PRIORITY
