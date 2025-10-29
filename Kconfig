@@ -15,6 +15,14 @@ config XEN_STORE_SRV
 	  Enable xenstore server library. It should be included
 	  if you are running Zephyr as Dom0.
 
+config XEN_STORE_SRV_SHELL_CMDS
+	depends on SHELL
+	depends on XEN_STORE_SRV
+	default y
+	bool "Enable XenStore server shell"
+	help
+	  Enable shell for XenStore server.
+
 config XEN_LIBFDT
 	bool "Enable libfdt support"
 	help
@@ -34,6 +42,14 @@ config XEN_DOMAIN_MANAGEMENT
 	help
 	  Enable domain management library. This library allows you
 	  to create, destroy and manage xen domains.
+
+config XEN_DOMAIN_MANAGEMENT_SHELL_CMDS
+	depends on SHELL
+	depends on XEN_DOMAIN_MANAGEMENT
+	default y
+	bool "Enable Xen domain management shell"
+	help
+	  Enable shell for Xen domain management.
 
 config XEN_DOMCFG_SECTION
 	bool "Enable Xen domain config section"
