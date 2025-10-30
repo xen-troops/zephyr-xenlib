@@ -16,8 +16,8 @@ LOG_MODULE_DECLARE(xen_dom_mgmt);
 
 #if defined(CONFIG_XEN_LIBFDT)
 
+#include <xen/public/xen.h>
 #include <zephyr/xen/dom0/domctl.h>
-#include <zephyr/xen/public/xen.h>
 
 #include <libfdt.h>
 #include <xen-dom-fdt.h>
