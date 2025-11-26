@@ -21,6 +21,12 @@
 #define CONTAINER_NAME_SIZE 64
 #define INIT_XENSTORE_BUFF_SIZE 80
 
+/*
+ * Defines the system-wide maximum number of user domains allowed at one time,
+ * including Dom0, Dom0less, and any manually created domains.
+ */
+#define ALL_DOMAINS_MAX (CONFIG_DOMU_MAX + 1)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

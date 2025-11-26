@@ -682,11 +682,11 @@ int get_domain_name(unsigned short domain_id, char *name, int len)
 uint32_t find_domain_by_name(char *arg)
 {
 	char domname[CONTAINER_NAME_SIZE];
-	struct xen_domctl_getdomaininfo infos[CONFIG_DOMU_MAX];
+	struct xen_domctl_getdomaininfo infos[ALL_DOMAINS_MAX];
 	uint32_t domid = 0;
 	int i, ret;
 
-	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOMU_MAX);
+	ret = xen_sysctl_getdomaininfo(infos, 0, ALL_DOMAINS_MAX);
 	if (ret < 0) {
 		goto out;
 	}
