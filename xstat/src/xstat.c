@@ -57,8 +57,8 @@ int xstat_getdominfo(struct xenstat_domain *domains, uint16_t first, uint16_t nu
 		return -EINVAL;
 	}
 
-	if (num > CONFIG_DOM_MAX) {
-		num = CONFIG_DOM_MAX;
+	if (num > CONFIG_DOMU_MAX) {
+		num = CONFIG_DOMU_MAX;
 	}
 
 	infos = k_malloc(sizeof(*infos) * num);

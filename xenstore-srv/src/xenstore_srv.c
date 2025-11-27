@@ -74,12 +74,12 @@ struct pending_watch_event_entry {
 };
 
 static K_THREAD_STACK_ARRAY_DEFINE(xenstore_thrd_stack,
-				   CONFIG_DOM_MAX,
+				   CONFIG_DOMU_MAX,
 				   XENSTORE_STACK_SIZE_PER_DOM);
 
 static uint32_t used_threads;
 static K_MUTEX_DEFINE(xs_stack_lock);
-BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOM_MAX);
+BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOMU_MAX);
 
 static K_MUTEX_DEFINE(xsel_mutex);
 static K_MUTEX_DEFINE(pfl_mutex);
@@ -124,7 +124,7 @@ static int get_stack_idx(void)
 /* Free allocated stack */
 static void free_stack_idx(int idx)
 {
-	__ASSERT_NO_MSG(idx < CONFIG_DOM_MAX);
+	__ASSERT_NO_MSG(idx < CONFIG_DOMU_MAX);
 
 	k_mutex_lock(&xs_stack_lock, K_FOREVER);
 

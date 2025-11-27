@@ -97,12 +97,12 @@ config PFN_CHUNK_SIZE
 	  Chunk size for helper functions for mapping/unmapping
 	  memory from guest domain to Dom0.
 
-config DOM_MAX
-	int "Maximum number of DomU"
+config DOMU_MAX
+	int "Maximum number of DomUs"
 	default 4
 	range 1 32
 	help
-	  Maximum number of DomU that can be created and launched.
+	  Maximum number of DomUs that can be created and launched.
 
 config XSTAT
 	bool "Enable XSTAT support"
