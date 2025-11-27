@@ -682,11 +682,11 @@ int get_domain_name(unsigned short domain_id, char *name, int len)
 uint32_t find_domain_by_name(char *arg)
 {
 	char domname[CONTAINER_NAME_SIZE];
-	struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
+	struct xen_domctl_getdomaininfo infos[CONFIG_DOMU_MAX];
 	uint32_t domid = 0;
 	int i, ret;
 
-	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOMU_MAX);
 	if (ret < 0) {
 		goto out;
 	}
@@ -725,7 +725,7 @@ int domain_create(struct xen_domain_cfg *domcfg, uint32_t domid)
 	struct modules_address modules = {0};
 	char *name;
 
-	if (dom_num >= CONFIG_DOM_MAX) {
+	if (dom_num >= CONFIG_DOMU_MAX) {
 		LOG_ERR("Runtime exceeds maximum number of domains");
 		return -EINVAL;
 	}
@@ -1008,7 +1008,7 @@ static int dom0less_get_next_domain(uint32_t domid_start, struct xen_domctl_getd
 
 	__ASSERT_NO_MSG(info);
 
-	for (i = domid_start; i < CONFIG_DOM_MAX; i++) {
+	for (i = domid_start; i < CONFIG_DOMU_MAX; i++) {
 		rc = xen_domctl_getdomaininfo(i, info);
 		if (rc && rc != -ESRCH) {
 			LOG_ERR("dom0less: getdomaininfo err (%d)", rc);
@@ -1130,7 +1130,7 @@ static int dom0less_init(void)
 
 		domid_start++;
 		created_doms++;
-	} while (rc < CONFIG_DOM_MAX);
+	} while (rc < CONFIG_DOMU_MAX);
 
 	LOG_INF("dom0less: attached %d domains", created_doms);
 

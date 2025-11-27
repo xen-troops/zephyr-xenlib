@@ -17,7 +17,7 @@
 #endif
 
 LOG_MODULE_REGISTER(xen_shell);
-static struct xen_domctl_getdomaininfo infos[CONFIG_DOM_MAX];
+static struct xen_domctl_getdomaininfo infos[CONFIG_DOMU_MAX];
 
 static struct xen_domain_cfg domcfg_tmp;
 
@@ -298,7 +298,7 @@ static int domain_list(const struct shell *shell, size_t argc, char **argv)
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
 
-	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOM_MAX);
+	ret = xen_sysctl_getdomaininfo(infos, 0, CONFIG_DOMU_MAX);
 	if (ret < 0) {
 		goto out;
 	}
