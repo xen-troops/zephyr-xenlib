@@ -3,8 +3,14 @@
 
 mainmenu "Xen Libraries"
 
+config XEN_STORE_COMMON
+	bool
+	help
+	  Common code for handling xenstore.
+
 config XEN_STORE_SRV
 	bool "Enable XenStore server"
+	select XEN_STORE_COMMON
 	help
 	  Enable xenstore server library. It should be included
 	  if you are running Zephyr as Dom0.
