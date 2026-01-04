@@ -290,7 +290,7 @@ int vch_connect(domid_t domain, const char *path, struct vch_handle *h)
 
 	h->evtch = rc;
 
-	h->ring = (struct vchan_interface *)gnttab_get_page();
+	h->ring = (struct vchan_interface *)gnttab_get_pages(1);
 	if (!h->ring) {
 		rc = -ENOMEM;
 		goto free_evtch;
@@ -334,7 +334,7 @@ free_gnt:
 	unmap.host_addr = xen_to_phys(h->ring);
 	unmap.handle = map.handle;
 	gnttab_unmap_refs(&unmap, 1);
-	gnttab_put_page(h->ring);
+	gnttab_put_pages(h->ring, 1);
 free_evtch:
 	unbind_event_channel(h->evtch);
 	memset(h, 0, sizeof(*h));
@@ -362,7 +362,7 @@ void vch_close(struct vch_handle *h)
 		unmap.host_addr = xen_to_phys(h->ring);
 		unmap.handle = h->grant_handle; 
 		gnttab_unmap_refs(&unmap, 1);
-		gnttab_put_page(h->ring);
+		gnttab_put_pages(h->ring, 1);
 	}
 	memset(h, 0, sizeof(*h));
 }
