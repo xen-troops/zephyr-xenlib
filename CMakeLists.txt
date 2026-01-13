@@ -3,6 +3,12 @@
 # Copyright (c) 2023 EPAM Systems
 # Author: Volodymyr Babchuk <volodymyr_babchuk@epam.com>
 
+set(ZEPHYR_XENLIB_DIR ${ZEPHYR_CURRENT_MODULE_DIR})
+
+zephyr_compile_definitions_ifdef(CONFIG_XEN __XEN_TOOLS__=1)
+
+zephyr_include_directories_ifdef(CONFIG_XEN ${ZEPHYR_XENLIB_DIR}/include)
+
 add_subdirectory_ifdef(CONFIG_XEN_STORE_COMMON xenstore-common)
 add_subdirectory_ifdef(CONFIG_XEN_STORE_SRV xenstore-srv)
 add_subdirectory_ifdef(CONFIG_XEN_DOMAIN_MANAGEMENT xen-dom-mgmt)

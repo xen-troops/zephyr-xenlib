@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/xen/generic.h>
-#include <zephyr/xen/public/io/console.h>
-#include <zephyr/xen/public/memory.h>
-#include <zephyr/xen/public/xen.h>
-#include <zephyr/xen/hvm.h>
-#include <zephyr/sys/barrier.h>
-
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/barrier.h>
+#include <zephyr/xen/generic.h>
+#include <zephyr/xen/hvm.h>
+
+#include <xen/public/io/console.h>
+#include <xen/public/memory.h>
+#include <xen/public/xen.h>
+
 #include <string.h>
 #include <stdio.h>
 
