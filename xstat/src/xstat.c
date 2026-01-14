@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <zephyr/arch/arm64/hypercall.h>
-#include <zephyr/xen/dom0/version.h>
+#include <zephyr/xen/version.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/dom0/sysctl.h>
 #include <zephyr/xen/public/sched.h>
