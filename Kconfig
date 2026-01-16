@@ -23,6 +23,41 @@ config XEN_STORE_SRV_SHELL_CMDS
 	help
 	  Enable shell for XenStore server.
 
+config XEN_STORE_CLI
+	bool "Enable XenStore client library"
+	select XEN_STORE_COMMON
+	help
+	  Enable the XenStore client library used to talk to the Xen hypervisor's
+	  key/value store.
+	  Applications can use it to read and write configuration data and runtime
+	  state via XenStore.
+
+
+config XEN_STORE_CLI_SHELL_CMDS
+	depends on SHELL
+	depends on XEN_STORE_CLI
+	bool "Enable XenStore cleint shell"
+	help
+	  Enable shell for XenStore client.
+
+if XEN_STORE_CLI
+
+config XEN_STORE_CLI_WORKQ_PRIORITY
+	int "XenStore CLI workqueue priority"
+	depends on XEN_STORE_CLI
+	default 0
+	help
+	  Thread priority for the xenstore-cli workqueue.
+
+config XEN_STORE_CLI_WORKQ_STACK_SIZE
+	int "XenStore CLI workqueue stack size"
+	depends on XEN_STORE_CLI
+	default 32768
+	help
+	  Stack size for the xenstore-cli workqueue thread.
+
+endif
+
 config XEN_LIBFDT
 	bool "Enable libfdt support"
 	help
