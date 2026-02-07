@@ -10,7 +10,7 @@
 #ifndef XENLIB_XSS_H
 #define XENLIB_XSS_H
 
-#include <zephyr/xen/public/xen.h>
+#include <xen/public/xen.h>
 
 /**
  * @brief Xenstore access control Interface

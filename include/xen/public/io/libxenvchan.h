@@ -30,9 +30,6 @@
  *  compile time, so the macros in ring.h cannot be used to access the rings.
  */
 
-#ifndef _XEN_PUBLIC_IO_LIBXENVCHAN_H
-#define _XEN_PUBLIC_IO_LIBXENVCHAN_H
-
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -85,4 +82,3 @@ struct vchan_interface {
 	uint32_t grants[0];
 };
 
-#endif /* _XEN_PUBLIC_IO_LIBXENVCHAN_H */
