@@ -11,12 +11,13 @@
 #include <string.h>
 #include <stdio.h>
 
+#include <xen/public/hvm/params.h>
+
 #include <zephyr/init.h>
-#include <zephyr/xen/events.h>
-#include <zephyr/xen/public/hvm/params.h>
-#include <zephyr/xen/hvm.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/barrier.h>
+#include <zephyr/xen/events.h>
+#include <zephyr/xen/hvm.h>
 
 #include <xenstore_common.h>
 #include <mem-mgmt.h>
