@@ -1,7 +1,7 @@
 # Copyright (c) 2024 EPAM Systems
 # SPDX-License-Identifier: Apache-2.0
 
-mainmenu "Xen Libraries"
+if XEN
 
 config XEN_STORE_COMMON
 	bool
@@ -146,3 +146,5 @@ config XEN_DOM0LESS_BOOT
 	  xenstore will be initialized.
 
 	  This is EXPERIMENTAL and depends on work in Xen mainline.
+
+endif # XEN
