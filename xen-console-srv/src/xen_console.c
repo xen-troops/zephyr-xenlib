@@ -442,9 +442,11 @@ static void console_display_thrd(void *p1, void *p2, void *p3)
 }
 
 static void console_shell_cb(const struct shell *shell,
-			     uint8_t *data, size_t len)
+			     uint8_t *data, size_t len, void *user_data)
 {
 	struct xen_domain_console *console;
+
+	ARG_UNUSED(user_data);
 
 	k_mutex_lock(&global_console_lock, K_FOREVER);
 	console = current_console;
@@ -453,7 +455,7 @@ static void console_shell_cb(const struct shell *shell,
 	if (!console) {
 		/* This may happen if xen_stop_domain_console() was
 		 * called when console is still attached */
-		shell_set_bypass(shell, NULL);
+		shell_set_bypass(shell, NULL, NULL);
 		return;
 	}
 
@@ -461,7 +463,7 @@ static void console_shell_cb(const struct shell *shell,
 		/* Detach console */
 		atomic_set_bit(&console->stop_thrd, INT_THREAD_STOP_BIT);
 		k_sem_give(&console->int_sem);
-		shell_set_bypass(shell, NULL);
+		shell_set_bypass(shell, NULL, NULL);
 		return;
 	}
 
@@ -509,7 +511,7 @@ int xen_attach_domain_console(const struct shell *shell,
 			console_display_thrd, console,
 			(void *)shell, NULL, XEN_CONSOLE_PRIO, 0, K_NO_WAIT);
 
-	shell_set_bypass(shell, console_shell_cb);
+	shell_set_bypass(shell, console_shell_cb, NULL);
 
 	put_domain(domain);
 	return 0;
