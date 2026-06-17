@@ -15,9 +15,11 @@
 
 #ifdef CONFIG_XEN_DOM0
 #define __XEN_TOOLS__
-/* Xen is built with matching headers and implements the latest interface. */
+#endif
+
+#ifdef CONFIG_XEN_INTERFACE_VERSION
 #define __XEN_INTERFACE_VERSION__ CONFIG_XEN_INTERFACE_VERSION
-#elif !defined(__XEN_INTERFACE_VERSION__)
+#else
 /* Guests which do not specify a version get the legacy interface. */
 #define __XEN_INTERFACE_VERSION__ 0x00000000
 #endif
