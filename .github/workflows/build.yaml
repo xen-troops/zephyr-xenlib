@@ -7,7 +7,7 @@ on:
   pull_request_target:
 
 env:
-  sdk_version: ${{ vars.SDK_VERSION  || '0.16.5-1' }}
+  sdk_version: ${{ vars.SDK_VERSION || '1.0.1' }}
   aos_revision: ${{ vars.AOS_REVISION || 'main' }}
   zephyr_revision: ${{ vars.ZEPHYR_REVISION || 'wip_dom0-xt_qemu' }}
 
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        target: [rcar_spider_ca55, rcar_salvator_xs_m3, rcar_h3ulcb_ca57, qemu_cortex_a53]
+        target: [rcar_spider_s4/r8a779f0/a55, rcar_salvator_xs, rcar_h3ulcb/r8a77951/a57, qemu_cortex_a53]
         project: [zephyr-dom0-xt, aos-core-zephyr]
         exclude:
           # This is temporary, AoS currently does not support Zephyr v3.6.0
@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install west pyelftools protobuf grpcio-tools
+          pip install west pyelftools protobuf grpcio-tools jsonschema
           sudo apt-get install ninja-build protobuf-compiler gperf
 
       - name: Cache Zephyr SDK
@@ -46,20 +46,20 @@ jobs:
         run: |
           mkdir sdk
           cd sdk
-          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ env.sdk_version }}/zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
-          tar xf zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
-          rm zephyr-sdk-${{ env.sdk_version }}_linux-x86_64.tar.xz
+          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ env.sdk_version }}/zephyr-sdk-${{ env.sdk_version }}_linux-x86_64_gnu.tar.xz
+          tar xf zephyr-sdk-${{ env.sdk_version }}_linux-x86_64_gnu.tar.xz
+          rm zephyr-sdk-${{ env.sdk_version }}_linux-x86_64_gnu.tar.xz
 
       - name: Install Zephyr SDK
         run: |
           cd sdk/zephyr-sdk-${{ env.sdk_version }}
-          yes | ./setup.sh
+          ./setup.sh -t all -h -c
 
       - name: Clone zephyr-dom0-xt
         uses: actions/checkout@v4
         if: matrix.project == 'zephyr-dom0-xt'
         with:
-          repository: xen-troops/zephyr-dom0-xt
+          repository: soburi/zephyr-dom0-xt
           ref: ${{ env.zephyr_revision }}
           path: zephyr-dom0-xt
 
