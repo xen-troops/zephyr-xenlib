@@ -7,6 +7,7 @@
 #undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+#include <zephyr/cache.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/dom0/sysctl.h>
@@ -145,8 +146,7 @@ static int allocate_magic_pages(int domid)
 	 * This is not critical, so try to restore memory to dom0
 	 * and then return error code.
 	 */
-	rc = xenmem_cacheflush_mapped_pfns(NR_MAGIC_PAGES,
-					   gfn_magic_base);
+	rc = arch_dcache_flush_and_invd_range(mapped_magic, NR_MAGIC_PAGES);
 	if (rc) {
 		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
 			domid, rc);
@@ -312,7 +312,7 @@ static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
 	 * This is not critical, so try to restore memory to dom0
 	 * and then return error code.
 	 */
-	rc = xenmem_cacheflush_mapped_pfns(nr_pages, dtb_pfn);
+	rc = arch_dcache_flush_and_invd_range(mapped_dtb_addr, nr_pages);
 	if (rc) {
 		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
 			domid, rc);
@@ -424,8 +424,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 	 * This is not critical, so try to restore memory to dom0
 	 * and then return error code.
 	 */
-	rc = xenmem_cacheflush_mapped_pfns(nr_pages,
-					   xen_virt_to_gfn(mapped_image));
+	rc = arch_dcache_flush_and_invd_range(mapped_image, nr_pages);
 	if (rc) {
 		LOG_ERR("Failed to flush memory for domid#%d (rc=%d)",
 			domid, rc);
