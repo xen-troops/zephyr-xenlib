@@ -47,17 +47,6 @@ int xenmem_map_region(int domid, uint64_t nr_pages,
 int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr);
 
 /**
- * Flushes PFNs mapped to Dom0
- *
- * @param nr_pages - number of pages with XEN_PAGE_SIZE for which
- * cache will be flushed
- * @param base_pfn - PFN from which cache will be flushed
- *
- * @return - zero on success, negative errno on failure
- */
-int xenmem_cacheflush_mapped_pfns(uint64_t nr_pages, uint64_t base_pfn);
-
-/**
  * Helper function to populate PFNs for given @domid.
  * Unlike standard xendom_populate_physmap this function
  * doesn't require passing array as one of the parameters,

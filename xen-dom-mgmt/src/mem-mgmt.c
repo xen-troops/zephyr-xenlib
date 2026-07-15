@@ -3,7 +3,6 @@
  * Copyright (c) 2023 EPAM Systems
  */
 
-#include <zephyr/xen/dom0/domctl.h>
 #include <zephyr/xen/memory.h>
 #if defined(CONFIG_XEN_REGIONS)
 #include <zephyr/xen/regions.h>
@@ -255,18 +254,3 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 	return put_region_space(mapped_addr, nr_pages);
 }
 
-int xenmem_cacheflush_mapped_pfns(uint64_t nr_pages, uint64_t base_pfn)
-{
-	struct xen_domctl_cacheflush cacheflush;
-	int rc;
-
-	cacheflush.start_pfn = base_pfn;
-	cacheflush.nr_pfns = nr_pages;
-	rc = xen_domctl_cacheflush(0, &cacheflush);
-	if (rc) {
-		LOG_ERR("Failed to flush cache for PFN [%llx-%llx] (rc=%d)",
-			base_pfn, base_pfn + nr_pages, rc);
-	}
-
-	return rc;
-}
