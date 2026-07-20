@@ -168,6 +168,7 @@ struct xen_domain_cfg {
 	uint32_t nr_dt_passthrough;
 
 	char *cmdline;
+	char *seclabel;
 
 	const char *dtb_start, *dtb_end;
 #if defined(CONFIG_XEN_DOMCFG_READ_PDT)
