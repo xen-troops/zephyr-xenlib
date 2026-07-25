@@ -7,6 +7,7 @@
 #undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+#include <zephyr/arch/cache.h>
 #include <zephyr/cache.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/xen/dom0/domctl.h>
