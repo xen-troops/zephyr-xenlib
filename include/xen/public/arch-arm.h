@@ -184,7 +184,7 @@
 #define uint64_aligned_t uint64_t __attribute__((__aligned__(8)))
 #endif
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 #define ___DEFINE_XEN_GUEST_HANDLE(name, type)                  \
     typedef union { type *p; unsigned long q; }                 \
         __guest_handle_ ## name;                                \
@@ -330,6 +330,10 @@ DEFINE_XEN_GUEST_HANDLE(vcpu_guest_context_t);
 #define XEN_DOMCTL_CONFIG_ARM_SCI_NONE      0
 #define XEN_DOMCTL_CONFIG_ARM_SCI_SCMI_SMC  1
 
+#define XEN_DOMCTL_CONFIG_ARM_V8R_EL1_MSA_NONE    0
+#define XEN_DOMCTL_CONFIG_ARM_V8R_EL1_MSA_PMSA    1
+#define XEN_DOMCTL_CONFIG_ARM_V8R_EL1_MSA_VMSA    2
+
 struct xen_arch_domainconfig {
     /* IN/OUT */
     uint8_t gic_version;
@@ -355,6 +359,9 @@ struct xen_arch_domainconfig {
     uint32_t clock_frequency;
     /* IN */
     uint8_t arm_sci_type;
+    /* IN */
+    uint8_t v8r_el1_msa;
+    uint16_t pad;
 };
 #endif /* __XEN__ || __XEN_TOOLS__ */
 
@@ -542,7 +549,7 @@ typedef uint64_t xen_callback_t;
 
 #endif
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 /* Stub definition of PMU structure */
 typedef struct xen_pmu_arch { uint8_t dummy; } xen_pmu_arch_t;
 #endif
