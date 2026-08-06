@@ -355,6 +355,11 @@ struct xen_arch_domainconfig {
     uint32_t clock_frequency;
     /* IN */
     uint8_t arm_sci_type;
+    /* IN */
+    uint8_t v8r_el1_msa;
+    /* IN */
+    uint8_t viommu_type;
+    uint8_t pad;
 };
 #endif /* __XEN__ || __XEN_TOOLS__ */
 
