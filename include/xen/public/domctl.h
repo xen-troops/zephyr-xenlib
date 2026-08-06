@@ -1281,6 +1281,24 @@ struct xen_domctl_get_domain_state {
     uint64_t unique_id;      /* Unique domain identifier. */
 };
 
+/*
+ * XEN_DOMCTL_viommu_alloc_vsid_range
+ *
+ * Allocate guest vSID range and
+ * establish pSID->vSID mapping for target range.
+ * Allocated range is continous
+ */
+struct xen_domctl_viommu_alloc_vsid_range {
+    /* IN: Range first pSID  */
+    uint32_t first_psid;
+    /* IN: Number of vSIDs to allocate */
+    uint16_t nr_sids;
+    /* padding, must be 0 */
+    uint16_t pad;
+    /* OUT: Mapped range first vSID */
+    uint32_t first_vsid;
+};
+
 struct xen_domctl {
 /* Stable domctl ops: interface_version is required to be 0.  */
     uint32_t cmd;
@@ -1373,6 +1391,7 @@ struct xen_domctl {
 #define XEN_DOMCTL_gsi_permission                88
 #define XEN_DOMCTL_set_llc_colors                89
 #define XEN_DOMCTL_get_domain_state              90 /* stable interface */
+#define XEN_DOMCTL_viommu_alloc_vsid_range       91
 #define XEN_DOMCTL_gdbsx_guestmemio            1000
 #define XEN_DOMCTL_gdbsx_pausevcpu             1001
 #define XEN_DOMCTL_gdbsx_unpausevcpu           1002
@@ -1441,6 +1460,7 @@ struct xen_domctl {
 #endif
         struct xen_domctl_set_llc_colors    set_llc_colors;
         struct xen_domctl_get_domain_state  get_domain_state;
+        struct xen_domctl_viommu_alloc_vsid_range viommu_alloc_vsid_range;
         uint8_t                             pad[128];
     } u;
 };
