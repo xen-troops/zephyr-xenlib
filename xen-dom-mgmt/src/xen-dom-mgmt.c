@@ -102,7 +102,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	int rc;
 
 	/* TODO: Alloc all required evtchns */
-	rc = alloc_unbound_event_channel_dom0(domain->domid, 0);
+	rc = alloc_unbound_event_channel_dom0(domain->domid, DOMID_SELF);
 	if (rc < 0) {
 		LOG_ERR("Failed to alloc evtchn for domain#%u xenstore (rc=%d)", domain->domid,
 		       rc);
@@ -113,7 +113,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	LOG_DBG("Generated remote_domid=%d, remote_evtchn = %d", domain->domid,
 		domain->xenstore.remote_evtchn);
 
-	rc = alloc_unbound_event_channel_dom0(domain->domid, 0);
+	rc = alloc_unbound_event_channel_dom0(domain->domid, DOMID_SELF);
 	if (rc < 0) {
 		LOG_ERR("Failed to alloc evtchn for domain#%u console (rc=%d)", domain->domid,
 		       rc);
@@ -147,13 +147,13 @@ static int allocate_magic_pages(int domid)
 	rc = xenmem_map_region(domid, NR_MAGIC_PAGES,
 			       gfn_magic_base, &mapped_magic);
 	if (rc) {
-		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
+		LOG_ERR("Failed to map GFN to control domain (rc=%d)", rc);
 		return rc;
 	}
 
 	memset(mapped_magic, 0, XEN_PAGE_SIZE * NR_MAGIC_PAGES);
 	/*
-	 * This is not critical, so try to restore memory to dom0
+	 * This is not critical, so try to restore control-domain memory
 	 * and then return error code.
 	 */
 	rc = arch_dcache_flush_and_invd_range(mapped_magic, NR_MAGIC_PAGES);
@@ -307,7 +307,7 @@ static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
 	rc = xenmem_map_region(domid, nr_pages,
 				XEN_PHYS_PFN(dtb_addr), &mapped_dtb_addr);
 	if (rc) {
-		LOG_ERR("Failed to map domain dtb region to Dom0 (rc=%d)", rc);
+		LOG_ERR("Failed to map domain dtb region to control domain (rc=%d)", rc);
 		return rc;
 	}
 
@@ -319,7 +319,7 @@ static int load_dtb(int domid, uint64_t dtb_addr, const char *dtb_start,
 	/* Copy binary to domain pages and flush cache */
 	memcpy(mapped_dtb_addr, dtb_start, dtb_size);
 	/*
-	 * This is not critical, so try to restore memory to dom0
+	 * This is not critical, so try to restore control-domain memory
 	 * and then return error code.
 	 */
 	rc = arch_dcache_flush_and_invd_range(mapped_dtb_addr, nr_pages);
@@ -414,7 +414,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 
 	rc = xenmem_map_region(domid, nr_pages, load_gfn, &mapped_image);
 	if (rc) {
-		LOG_ERR("Failed to map GFN to Dom0 (rc=%d)", rc);
+		LOG_ERR("Failed to map GFN to control domain (rc=%d)", rc);
 		goto out_dtb;
 	}
 
@@ -431,7 +431,7 @@ static int probe_zimage(int domid, uint64_t base_addr,
 
 	LOG_DBG("Kernel image is copied");
 	/*
-	 * This is not critical, so try to restore memory to dom0
+	 * This is not critical, so try to restore control-domain memory
 	 * and then return error code.
 	 */
 	rc = arch_dcache_flush_and_invd_range(mapped_image, nr_pages);
@@ -1013,22 +1013,20 @@ deinit:
 #ifdef CONFIG_XEN_DOM0LESS_BOOT
 static int dom0less_get_next_domain(uint32_t domid_start, struct xen_domctl_getdomaininfo *info)
 {
-	int i, rc;
+	int rc;
 
 	__ASSERT_NO_MSG(info);
 
-	for (i = domid_start; i < CONFIG_DOMU_MAX; i++) {
-		rc = xen_domctl_getdomaininfo(i, info);
-		if (rc && rc != -ESRCH) {
-			LOG_ERR("dom0less: getdomaininfo err (%d)", rc);
-			break;
-		}
-		if (!rc) {
-			break;
-		}
+	if (domid_start >= DOMID_FIRST_RESERVED) {
+		return -ESRCH;
 	}
 
-	return rc ? rc : i;
+	rc = xen_sysctl_getdomaininfo(info, domid_start, 1);
+	if (rc < 0) {
+		LOG_ERR("dom0less: getdomaininfo err (%d)", rc);
+		return rc;
+	}
+	return rc ? info->domain : -ESRCH;
 }
 
 static int dom0less_init_domain(uint32_t domid, struct xen_domctl_getdomaininfo *infos)
@@ -1055,9 +1053,9 @@ static int dom0less_init_domain(uint32_t domid, struct xen_domctl_getdomaininfo 
 
 	/*
 	 * Xenstore initialization.
-	 * In dom0less boot case the Xenstore event is already allocated and also allocated
-	 * XEN_MAGIC pages, so Dom0 here should get them and use to init Xenstore.
-	 * At the end Dom0 should set HVM_PARAM_STORE_PFN
+	 * In a dom0less boot, Xen has already allocated the XenStore event
+	 * channel and XEN_MAGIC pages. The control domain uses them to
+	 * initialize XenStore and then sets HVM_PARAM_STORE_PFN
 	 * to notify guest domain that Xenstore is ready.
 	 */
 	rc = hvm_get_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, &value);
@@ -1130,16 +1128,20 @@ static int dom0less_init(void)
 		if (rc < 0) {
 			break;
 		}
-		domid_start = rc;
 
-		rc = dom0less_init_domain(domid_start, &dominfo);
+		domid_start = rc + 1;
+
+		if (dominfo.domain == CONFIG_XEN_CONTROL_DOMAIN_ID) {
+			continue;
+		}
+
+		rc = dom0less_init_domain(dominfo.domain, &dominfo);
 		if (rc) {
 			break;
 		}
 
-		domid_start++;
 		created_doms++;
-	} while (rc < CONFIG_DOMU_MAX);
+	} while (created_doms < CONFIG_DOMU_MAX);
 
 	LOG_INF("dom0less: attached %d domains", created_doms);
 
@@ -1147,30 +1149,33 @@ static int dom0less_init(void)
 }
 #endif /* CONFIG_XEN_DOM0LESS_BOOT */
 
-static int init_domain0(void)
+static int init_control_domain(void)
 {
 	struct xen_domctl_getdomaininfo dominfo;
+	const uint32_t control_domid = CONFIG_XEN_CONTROL_DOMAIN_ID;
+	char domid_str[sizeof("32751")];
 	int ret = 0;
-	struct xen_domain *dom0 = NULL;
+	struct xen_domain *control_domain = NULL;
 
-	ret = xen_domctl_getdomaininfo(0, &dominfo);
+	ret = xen_domctl_getdomaininfo(control_domid, &dominfo);
 	if (ret) {
 		LOG_ERR("init: getdomaininfo err (%d)", ret);
 		return ret;
 	}
 
-	dom0 = k_malloc(sizeof(*dom0));
-	if (!dom0) {
+	control_domain = k_malloc(sizeof(*control_domain));
+	if (!control_domain) {
 		ret = -ENOMEM;
-		LOG_ERR("Can't allocate memory for dom0 domain struct");
+		LOG_ERR("Can't allocate memory for control domain struct");
 		goto out;
 	}
-	memset(dom0, 0, sizeof(*dom0));
+	memset(control_domain, 0, sizeof(*control_domain));
 
-	snprintf(dom0->name, CONTAINER_NAME_SIZE, "%s", DOM0_NAME);
-	dom0->domid = 0;
-	dom0->num_vcpus = dominfo.max_vcpu_id + 1;
-	dom0->max_mem_kb = (dominfo.tot_pages * XEN_PAGE_SIZE) / 1024;
+	snprintf(control_domain->name, CONTAINER_NAME_SIZE, "Domain-%u",
+		 control_domid);
+	control_domain->domid = control_domid;
+	control_domain->num_vcpus = dominfo.max_vcpu_id + 1;
+	control_domain->max_mem_kb = (dominfo.tot_pages * XEN_PAGE_SIZE) / 1024;
 
 	ret = xs_init_root();
 	if (ret) {
@@ -1183,9 +1188,24 @@ static int init_domain0(void)
 		LOG_ERR("Failed to create /tool/xenstored node, err = %d", ret);
 	}
 
-	ret = xs_initialize_xenstore(0, dom0);
+	/*
+	 * Preserve the traditional Dom0 layout: Xen toolstacks fall back to
+	 * Dom0 when this node is absent, and some tools use its presence to
+	 * identify a XenStore stub domain.
+	 */
+	if (control_domid != 0) {
+		snprintf(domid_str, sizeof(domid_str), "%u", control_domid);
+		ret = xss_write("/tool/xenstored/domid", domid_str);
+		if (ret) {
+			LOG_ERR("Failed to publish XenStore domain ID, err = %d", ret);
+			goto out;
+		}
+	}
+
+	ret = xs_initialize_xenstore(control_domid, control_domain);
 	if (ret) {
-		LOG_ERR("Failed to add Domain-0 xenstore entries, err = %d", ret);
+		LOG_ERR("Failed to add control domain XenStore, err = %d",
+			ret);
 	}
 
 #ifdef CONFIG_XEN_DOM0LESS_BOOT
@@ -1193,9 +1213,9 @@ static int init_domain0(void)
 #endif /* CONFIG_XEN_DOM0LESS_BOOT */
 
 out:
-	k_free(dom0);
+	k_free(control_domain);
 
 	return ret;
 }
 
-SYS_INIT(init_domain0, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(init_control_domain, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
