@@ -203,7 +203,8 @@ int xenstore_ring_write(struct xenstore_domain_interface *intf, const void *data
  * @brief Read data from the XenStore ring buffer.
  *
  * @param intf   Domain interface describing the shared ring.
- * @param data   Destination buffer that receives the data.
+ * @param data   Destination buffer that receives the data, or NULL to discard
+ *               bytes while advancing the consumer index.
  * @param len    Maximum number of bytes to read.
  * @param client Set to true when invoked from a XenStore client context.
  *
