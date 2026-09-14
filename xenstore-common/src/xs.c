@@ -54,3 +54,13 @@ int xs_mkdir(const char *path, uint32_t tx_id)
 {
 	return xs_mkdir_timeout(path, tx_id, xs_default_timeout());
 }
+
+int xs_watch(const char *path, const char *token, xs_watch_cb cb, void *param)
+{
+	return xs_watch_timeout(path, token, cb, param, xs_default_timeout());
+}
+
+int xs_unwatch(const char *path, const char *token)
+{
+	return xs_unwatch_timeout(path, token, xs_default_timeout());
+}
