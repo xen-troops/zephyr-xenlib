@@ -600,11 +600,6 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 			   domain->domid);
 	__ASSERT_NO_MSG(loc_len < sizeof(local));
 
-	/* Check permissions */
-	if (!key_to_entry_check_perm(local, domain->domid, XS_PERM_READ)) {
-		return -EACCES;
-	}
-
 	/* This function should be called when we already hold wel_mutex */
 	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
 		char *payload, *epath_buf = pending_path;
@@ -935,14 +930,51 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 				     sys_timepoint_calc(tout));
 }
 
-static int notify_watchers_deadline(const char *path, uint32_t caller_domid,
-				    k_timepoint_t deadline)
+static int queue_pending_watch_event(struct xen_domain *domain, const char *path,
+				     k_timepoint_t deadline)
 {
-	struct watch_entry *iter;
 	struct pending_watch_event_entry *pentry;
 	int rc;
 
-	ARG_UNUSED(caller_domid);
+	pentry = k_malloc(sizeof(*pentry));
+	if (!pentry) {
+		LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
+			domain->domid, path);
+		return -ENOMEM;
+	}
+
+	pentry->key = k_malloc(xenstore_str_byte_size(path));
+	if (!pentry->key) {
+		k_free(pentry);
+		LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
+			domain->domid, path);
+		return -ENOMEM;
+	}
+
+	strcpy(pentry->key, path);
+	pentry->domain = domain;
+
+	sys_dnode_init(&pentry->node);
+	rc = xss_mutex_lock_deadline(&pfl_mutex, deadline);
+	if (rc) {
+		k_free(pentry->key);
+		k_free(pentry);
+		return rc;
+	}
+	sys_dlist_append(&pending_watch_event_list,
+			 &pentry->node);
+	k_mutex_unlock(&pfl_mutex);
+
+	/* Wake watcher thread up */
+	k_sem_give(&domain->xenstore.xb_sem);
+
+	return 0;
+}
+
+static int queue_watch_notifications_xsel_locked(const char *path, k_timepoint_t deadline)
+{
+	struct watch_entry *iter;
+	int rc;
 
 	rc = xss_mutex_lock_deadline(&wel_mutex, deadline);
 	if (rc) {
@@ -954,44 +986,36 @@ static int notify_watchers_deadline(const char *path, uint32_t caller_domid,
 			continue;
 		}
 
-		pentry = k_malloc(sizeof(*pentry));
-		if (!pentry) {
-			goto pentry_fail;
+		if (!key_to_entry_check_perm(path, iter->domain->domid, XS_PERM_READ)) {
+			continue;
 		}
 
-		pentry->key = k_malloc(xenstore_str_byte_size(path));
-		if (!pentry->key) {
-			goto pkey_fail;
+		if (queue_pending_watch_event(iter->domain, path, deadline)) {
+			break;
 		}
-
-		strcpy(pentry->key, path);
-		pentry->domain = iter->domain;
-
-		sys_dnode_init(&pentry->node);
-		k_mutex_lock(&pfl_mutex, K_FOREVER);
-		sys_dlist_append(&pending_watch_event_list,
-				 &pentry->node);
-		k_mutex_unlock(&pfl_mutex);
-
-		/* Wake watcher thread up */
-		k_sem_give(&iter->domain->xenstore.xb_sem);
 	}
 	k_mutex_unlock(&wel_mutex);
 
 	return 0;
-
-pkey_fail:
-	k_free(pentry);
-pentry_fail:
-	k_mutex_unlock(&wel_mutex);
-	LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
-		iter->domain->domid, path);
-	return -ENOMEM;
 }
 
-static void notify_watchers(const char *path, uint32_t caller_domid)
+static int notify_watchers_deadline(const char *path, k_timepoint_t deadline)
 {
-	(void)notify_watchers_deadline(path, caller_domid, sys_timepoint_calc(K_FOREVER));
+	int rc;
+
+	rc = xss_mutex_lock_deadline(&xsel_mutex, deadline);
+	if (rc) {
+		return rc;
+	}
+	rc = queue_watch_notifications_xsel_locked(path, deadline);
+	k_mutex_unlock(&xsel_mutex);
+
+	return rc;
+}
+
+static void notify_watchers(const char *path)
+{
+	(void)notify_watchers_deadline(path, sys_timepoint_calc(K_FOREVER));
 }
 
 int xss_write(const char *path, const char *value)
@@ -1011,7 +1035,7 @@ int xss_write(const char *path, const char *value)
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+		notify_watchers(path);
 	}
 
 	return rc;
@@ -1034,7 +1058,7 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+		notify_watchers(path);
 	}
 
 	return rc;
@@ -1072,7 +1096,7 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+		notify_watchers(path);
 	}
 
 	return rc;
@@ -1103,7 +1127,7 @@ int xss_write_guest_with_permissions(const char *path, const char *value, uint32
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+		notify_watchers(path);
 	}
 
 	return rc;
@@ -1273,7 +1297,7 @@ static void _handle_write(struct xenstore *xenstore, uint32_t id,
 	}
 
 	send_reply(xenstore, id, msg_type, "OK");
-	notify_watchers(path, domain->domid);
+	notify_watchers(path);
 
 free_data:
 	k_free(data);
@@ -1511,6 +1535,11 @@ static int xss_do_rm_deadline(const char *key, uint32_t caller_id, k_timepoint_t
 		return -EINVAL;
 	}
 
+	rc = queue_watch_notifications_xsel_locked(key, deadline);
+	if (rc) {
+		k_mutex_unlock(&xsel_mutex);
+		return rc;
+	}
 	free_node(entry);
 	k_mutex_unlock(&xsel_mutex);
 
@@ -1524,22 +1553,21 @@ static int xss_do_rm(const char *key, uint32_t caller_id, k_timeout_t tout)
 
 int xss_rm(const char *path)
 {
-	int ret = xss_do_rm(path, XENSTORE_LOCAL_DOMAIN_ID, K_FOREVER);
-
-	if (!ret) {
-		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
-	}
-
-	return ret;
+	return xss_do_rm(path, XENSTORE_LOCAL_DOMAIN_ID, K_FOREVER);
 }
 
 static void handle_rm(struct xenstore *xenstore, uint32_t id, char *payload,
 	       uint32_t len)
 {
-	if (xss_do_rm(payload, xenstore->domain->domid, K_FOREVER)) {
-		notify_watchers(payload, xenstore->domain->domid);
-		send_reply_read(xenstore, id, XS_RM, "");
+	int rc;
+
+	rc = xss_do_rm(payload, xenstore->domain->domid, K_FOREVER);
+	if (rc) {
+		send_errno(xenstore, id, -rc);
+		return;
 	}
+
+	send_reply_read(xenstore, id, XS_RM, "");
 }
 
 static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
@@ -2198,7 +2226,7 @@ int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_time
 		return rc;
 	}
 
-	rc = notify_watchers_deadline(local_path, XENSTORE_LOCAL_DOMAIN_ID, deadline);
+	rc = notify_watchers_deadline(local_path, deadline);
 	k_free(local_path);
 
 	return rc;
@@ -2231,7 +2259,7 @@ int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return ret;
 	}
 
-	ret = notify_watchers_deadline(local_path, XENSTORE_LOCAL_DOMAIN_ID, deadline);
+	ret = notify_watchers_deadline(local_path, deadline);
 	k_free(local_path);
 
 	return ret;
@@ -2426,7 +2454,7 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return ret;
 	}
 
-	ret = notify_watchers_deadline(local_path, XENSTORE_LOCAL_DOMAIN_ID, deadline);
+	ret = notify_watchers_deadline(local_path, deadline);
 	k_free(local_path);
 
 	return ret;
