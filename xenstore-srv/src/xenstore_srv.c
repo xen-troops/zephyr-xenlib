@@ -18,6 +18,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/clock.h>
+#include <zephyr/sys/ref.h>
 #include <zephyr/xen/events.h>
 #include <zephyr/xen/hvm.h>
 
@@ -63,11 +64,25 @@ struct xs_entry {
 	sys_dnode_t node;
 };
 
+struct xs_watcher {
+	xs_watch_cb cb;
+	void *param;
+	/* Retains the changed path, which may differ from the watch key, until dispatch. */
+	char *pending_path;
+	/* Links the watcher into the pending local callback dispatch list. */
+	sys_dnode_t pending_node;
+};
+
 struct watch_entry {
 	char *key;
 	char *token;
 	struct xen_domain *domain;
 	bool is_relative;
+
+	/* Holds callback state used only by server-local control-domain clients. */
+	struct xs_watcher local_watcher;
+	/* Keeps the whole entry alive while a local callback is pending or running. */
+	struct sys_ref ref;
 
 	sys_dnode_t node;
 };
@@ -90,6 +105,7 @@ BUILD_ASSERT(sizeof(used_threads) * CHAR_BIT >= CONFIG_DOMU_MAX);
 static K_MUTEX_DEFINE(xsel_mutex);
 static K_MUTEX_DEFINE(pfl_mutex);
 static K_MUTEX_DEFINE(wel_mutex);
+static K_MUTEX_DEFINE(local_watch_dispatch_mutex);
 
 static sys_dlist_t watch_entry_list = SYS_DLIST_STATIC_INIT(&watch_entry_list);
 static sys_dlist_t pending_watch_event_list =
@@ -954,6 +970,71 @@ static int xss_do_write(const char *const_path, const char *data, uint32_t domid
 				     sys_timepoint_calc(tout));
 }
 
+static void destroy_watch_entry(struct watch_entry *entry)
+{
+	k_free(entry->local_watcher.pending_path);
+	k_free(entry->key);
+	k_free(entry->token);
+	k_free(entry);
+}
+
+static void watch_entry_release(struct sys_ref *ref)
+{
+	struct watch_entry *entry = CONTAINER_OF(ref, struct watch_entry, ref);
+
+	destroy_watch_entry(entry);
+}
+
+static void watch_entry_put(struct watch_entry *entry)
+{
+	(void)sys_ref_put(&entry->ref, watch_entry_release);
+}
+
+static int queue_local_watch_event_locked(sys_dlist_t *local_events,
+					  struct watch_entry *entry,
+					  const char *path)
+{
+	char *event_path;
+
+	if (!local_events || !entry || !path || entry->domain) {
+		return -EINVAL;
+	}
+
+	event_path = k_malloc(xenstore_str_byte_size(path));
+	if (!event_path) {
+		return -ENOMEM;
+	}
+
+	strcpy(event_path, path);
+	sys_ref_get(&entry->ref);
+	__ASSERT_NO_MSG(entry->local_watcher.pending_path == NULL);
+	entry->local_watcher.pending_path = event_path;
+	sys_dlist_append(local_events, &entry->local_watcher.pending_node);
+
+	return 0;
+}
+
+static void dispatch_local_watch_events_locked(sys_dlist_t *local_events)
+{
+	struct xs_watcher *watcher, *next;
+
+	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(local_events, watcher, next, pending_node) {
+		struct watch_entry *entry = CONTAINER_OF(watcher, struct watch_entry,
+							 local_watcher);
+		/* Preserve this event while a reentrant callback queues the next one. */
+		char *event_path;
+
+		sys_dlist_remove(&watcher->pending_node);
+		event_path = watcher->pending_path;
+		watcher->pending_path = NULL;
+
+		watcher->cb(event_path, entry->token, watcher->param);
+
+		k_free(event_path);
+		watch_entry_put(entry);
+	}
+}
+
 static int queue_pending_watch_event(struct xen_domain *domain, const char *path,
 				     k_timepoint_t deadline)
 {
@@ -996,10 +1077,16 @@ static int queue_pending_watch_event(struct xen_domain *domain, const char *path
 }
 
 static int queue_watch_notifications_xsel_locked(const char *path, bool recursive_remove,
+						 sys_dlist_t *local_events,
 						 k_timepoint_t deadline)
 {
 	struct watch_entry *iter;
+	char local[XENSTORE_MAX_LOCALPATH_LEN];
+	size_t loc_len;
 	int rc;
+
+	loc_len = snprintf(local, sizeof(local), "/local/domain/%d/", XENSTORE_LOCAL_DOMAIN_ID);
+	__ASSERT_NO_MSG(loc_len < sizeof(local));
 
 	rc = xss_mutex_lock_deadline(&wel_mutex, deadline);
 	if (rc) {
@@ -1014,6 +1101,22 @@ static int queue_watch_notifications_xsel_locked(const char *path, bool recursiv
 		} else if (recursive_remove && xenstore_path_contains(path, iter->key)) {
 			event_path = iter->key;
 		} else {
+			continue;
+		}
+
+		if (!iter->domain) {
+			if (!key_to_entry_check_perm(event_path, XENSTORE_LOCAL_DOMAIN_ID,
+						     XS_PERM_READ)) {
+				continue;
+			}
+
+			if (iter->is_relative) {
+				event_path += loc_len;
+			}
+
+			if (queue_local_watch_event_locked(local_events, iter, event_path)) {
+				LOG_WRN("Failed to queue local watch event for %s", path);
+			}
 			continue;
 		}
 
@@ -1040,14 +1143,25 @@ static int queue_watch_notifications_xsel_locked(const char *path, bool recursiv
 
 static int notify_watchers_deadline(const char *path, k_timepoint_t deadline)
 {
+	sys_dlist_t local_events;
 	int rc;
 
-	rc = xss_mutex_lock_deadline(&xsel_mutex, deadline);
+	sys_dlist_init(&local_events);
+
+	rc = xss_mutex_lock_deadline(&local_watch_dispatch_mutex, deadline);
 	if (rc) {
 		return rc;
 	}
-	rc = queue_watch_notifications_xsel_locked(path, false, deadline);
+
+	rc = xss_mutex_lock_deadline(&xsel_mutex, deadline);
+	if (rc) {
+		k_mutex_unlock(&local_watch_dispatch_mutex);
+		return rc;
+	}
+	rc = queue_watch_notifications_xsel_locked(path, false, &local_events, deadline);
 	k_mutex_unlock(&xsel_mutex);
+	dispatch_local_watch_events_locked(&local_events);
+	k_mutex_unlock(&local_watch_dispatch_mutex);
 
 	return rc;
 }
@@ -1515,12 +1629,45 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	send_reply(xenstore, id, XS_SET_PERMS, "OK");
 }
 
+static struct watch_entry *alloc_local_watch_entry(char *key, const char *token,
+						   xs_watch_cb cb, void *param,
+						   bool is_relative)
+{
+	struct watch_entry *entry;
+
+	if (!cb) {
+		return NULL;
+	}
+
+	entry = k_malloc(sizeof(*entry));
+	if (!entry) {
+		return NULL;
+	}
+
+	entry->token = k_malloc(xenstore_str_byte_size(token));
+	if (!entry->token) {
+		k_free(entry);
+		return NULL;
+	}
+
+	entry->key = key;
+	strcpy(entry->token, token);
+	entry->domain = NULL;
+	entry->local_watcher.cb = cb;
+	entry->local_watcher.param = param;
+	entry->local_watcher.pending_path = NULL;
+	sys_dnode_init(&entry->local_watcher.pending_node);
+	entry->is_relative = is_relative;
+	sys_ref_init(&entry->ref);
+	sys_dnode_init(&entry->node);
+
+	return entry;
+}
+
 static void remove_watch_entry(struct watch_entry *entry)
 {
-	k_free(entry->key);
-	k_free(entry->token);
 	sys_dlist_remove(&entry->node);
-	k_free(entry);
+	watch_entry_put(entry);
 }
 
 static void handle_reset_watches(struct xenstore *xenstore, uint32_t id,
@@ -1562,25 +1709,40 @@ static void handle_read(struct xenstore *xenstore, uint32_t id, char *payload,
 static int xss_do_rm_deadline(const char *key, uint32_t caller_id, k_timepoint_t deadline)
 {
 	struct xs_entry *entry;
+	sys_dlist_t local_events;
 	int rc;
+
+	sys_dlist_init(&local_events);
+
+	rc = xss_mutex_lock_deadline(&local_watch_dispatch_mutex, deadline);
+	if (rc) {
+		return rc;
+	}
 
 	rc = xss_mutex_lock_deadline(&xsel_mutex, deadline);
 	if (rc) {
+		k_mutex_unlock(&local_watch_dispatch_mutex);
 		return rc;
 	}
 	entry = key_to_entry_check_perm(key, caller_id, XS_PERM_WRITE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_mutex_unlock(&local_watch_dispatch_mutex);
 		return -EINVAL;
 	}
 
-	rc = queue_watch_notifications_xsel_locked(key, true, deadline);
+	rc = queue_watch_notifications_xsel_locked(key, true, &local_events, deadline);
 	if (rc) {
 		k_mutex_unlock(&xsel_mutex);
+		/* Release queued references; XenStore permits spurious watch events. */
+		dispatch_local_watch_events_locked(&local_events);
+		k_mutex_unlock(&local_watch_dispatch_mutex);
 		return rc;
 	}
 	free_node(entry);
 	k_mutex_unlock(&xsel_mutex);
+	dispatch_local_watch_events_locked(&local_events);
+	k_mutex_unlock(&local_watch_dispatch_mutex);
 
 	return 0;
 }
@@ -1667,7 +1829,12 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 		memcpy(wentry->key, path, full_plen);
 		memcpy(wentry->token, token, len - path_len);
 		wentry->domain = domain;
+		wentry->local_watcher.cb = NULL;
+		wentry->local_watcher.param = NULL;
+		wentry->local_watcher.pending_path = NULL;
+		sys_dnode_init(&wentry->local_watcher.pending_node);
 		wentry->is_relative = path_is_relative;
+		sys_ref_init(&wentry->ref);
 		sys_dnode_init(&wentry->node);
 
 		k_mutex_lock(&wel_mutex, K_FOREVER);
@@ -2298,7 +2465,6 @@ int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return ret;
 	}
 
-	ret = notify_watchers_deadline(local_path, deadline);
 	k_free(local_path);
 
 	return ret;
@@ -2497,4 +2663,122 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 	k_free(local_path);
 
 	return ret;
+}
+
+int xs_watch_timeout(const char *path, const char *token, xs_watch_cb cb, void *param,
+		     k_timeout_t tout)
+{
+	struct watch_entry *wentry;
+	sys_dlist_t local_events;
+	char *watch_path;
+	bool fire_initial_event = false;
+	bool is_relative;
+	k_timepoint_t end;
+	int rc;
+
+	if (!path || !token || !cb) {
+		return -EINVAL;
+	}
+
+	is_relative = !xenstore_is_abs_path(path);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &watch_path);
+	if (rc) {
+		return rc;
+	}
+
+	end = sys_timepoint_calc(tout);
+
+	rc = xss_mutex_lock_deadline(&xsel_mutex, end);
+	if (rc) {
+		k_free(watch_path);
+		return rc;
+	}
+	fire_initial_event = key_to_entry_check_perm(watch_path, XENSTORE_LOCAL_DOMAIN_ID,
+						     XS_PERM_READ) != NULL;
+	k_mutex_unlock(&xsel_mutex);
+
+	rc = xss_mutex_lock_deadline(&wel_mutex, end);
+	if (rc) {
+		k_free(watch_path);
+		return rc;
+	}
+	if (key_to_watcher(watch_path, token, NULL)) {
+		k_mutex_unlock(&wel_mutex);
+		k_free(watch_path);
+		return -EEXIST;
+	}
+	k_mutex_unlock(&wel_mutex);
+
+	wentry = alloc_local_watch_entry(watch_path, token, cb, param, is_relative);
+	if (!wentry) {
+		k_free(watch_path);
+		return -ENOMEM;
+	}
+	watch_path = NULL;
+
+	sys_dlist_init(&local_events);
+	rc = xss_mutex_lock_deadline(&local_watch_dispatch_mutex, end);
+	if (rc) {
+		destroy_watch_entry(wentry);
+		return rc;
+	}
+
+	rc = xss_mutex_lock_deadline(&wel_mutex, end);
+	if (rc) {
+		k_mutex_unlock(&local_watch_dispatch_mutex);
+		destroy_watch_entry(wentry);
+		return rc;
+	}
+
+	if (key_to_watcher(wentry->key, token, NULL)) {
+		k_mutex_unlock(&wel_mutex);
+		k_mutex_unlock(&local_watch_dispatch_mutex);
+		destroy_watch_entry(wentry);
+		return -EEXIST;
+	}
+	sys_dlist_append(&watch_entry_list, &wentry->node);
+
+	if (fire_initial_event &&
+	    queue_local_watch_event_locked(&local_events, wentry, path)) {
+		LOG_WRN("Failed to queue initial local watch event for %s", path);
+	}
+	k_mutex_unlock(&wel_mutex);
+	dispatch_local_watch_events_locked(&local_events);
+	k_mutex_unlock(&local_watch_dispatch_mutex);
+	k_free(watch_path);
+
+	return 0;
+}
+
+int xs_unwatch_timeout(const char *path, const char *token, k_timeout_t tout)
+{
+	struct watch_entry *entry;
+	char *watch_path;
+	k_timepoint_t end;
+	int rc;
+
+	if (!path || !token) {
+		return -EINVAL;
+	}
+
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &watch_path);
+	if (rc) {
+		return rc;
+	}
+
+	end = sys_timepoint_calc(tout);
+
+	rc = xss_mutex_lock_deadline(&wel_mutex, end);
+	if (rc) {
+		k_free(watch_path);
+		return rc;
+	}
+	entry = key_to_watcher(watch_path, token, NULL);
+	if (entry) {
+		remove_watch_entry(entry);
+	}
+	k_mutex_unlock(&wel_mutex);
+	k_free(watch_path);
+
+	return 0;
 }
