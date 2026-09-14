@@ -42,6 +42,22 @@ void xs_set_default_timeout(k_timeout_t tout);
 int xs_init(void);
 
 /**
+ * @brief Watch notification callback.
+ *
+ * Invoked when a XenStore watch fires.
+ *
+ * @param[in]     path       XenStore path that triggered the watch, reported in
+ *                           the watched path form. The pointer is only valid
+ *                           for the duration of the callback.
+ * @param[in]     token      User-supplied token associated with the watch
+ *                           subscription. The pointer is only valid for the
+ *                           duration of the callback.
+ * @param[in]     param      Opaque user pointer provided when the watch was
+ *                           created.
+ */
+typedef void (*xs_watch_cb)(const char *path, const char *token, void *param);
+
+/**
  * @brief Read the value stored at a XenStore path.
  *
  * When @p buf is not large enough for the full value, the implementation
@@ -269,6 +285,65 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout);
  * @retval -errno on failure.
  */
 int xs_mkdir(const char *path, uint32_t tx_id);
+
+/**
+ * @brief Start watching XenStore path changes.
+ *
+ * A watch is identified by the @p path and @p token pair. Use different tokens
+ * when multiple users need independent callbacks for the same path.
+ *
+ * @param[in]     path       XenStore path to watch.
+ * @param[in]     token      User token returned with matching watch events.
+ * @param[in]     cb         Callback function invoked for this watch.
+ * @param[in]     param      Opaque user data passed to @p cb.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
+ *
+ * @retval 0 on success.
+ * @retval -EEXIST @p path and @p token are already watched.
+ * @retval -errno on failure.
+ */
+int xs_watch_timeout(const char *path, const char *token, xs_watch_cb cb, void *param,
+		     k_timeout_t tout);
+
+/**
+ * @brief Start watching XenStore path changes using the default timeout.
+ *
+ * A watch is identified by the @p path and @p token pair. Use different tokens
+ * when multiple users need independent callbacks for the same path.
+ *
+ * @param[in]     path       XenStore path to watch.
+ * @param[in]     token      User token returned with matching watch events.
+ * @param[in]     cb         Callback function invoked for this watch.
+ * @param[in]     param      Opaque user data passed to @p cb.
+ *
+ * @retval 0 on success.
+ * @retval -EEXIST @p path and @p token are already watched.
+ * @retval -errno on failure.
+ */
+int xs_watch(const char *path, const char *token, xs_watch_cb cb, void *param);
+
+/**
+ * @brief Stop watching XenStore path changes.
+ *
+ * @param[in]     path       XenStore path to stop watching.
+ * @param[in]     token      User token passed to xs_watch_timeout().
+ * @param[in]     tout       Maximum time for implementation blocking waits.
+ *
+ * @retval 0 on success.
+ * @retval -errno on failure.
+ */
+int xs_unwatch_timeout(const char *path, const char *token, k_timeout_t tout);
+
+/**
+ * @brief Stop watching XenStore path changes using the default timeout.
+ *
+ * @param[in]     path       XenStore path to stop watching.
+ * @param[in]     token      User token passed to xs_watch().
+ *
+ * @retval 0 on success.
+ * @retval -errno on failure.
+ */
+int xs_unwatch(const char *path, const char *token);
 
 #ifdef __cplusplus
 }
