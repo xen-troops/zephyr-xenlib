@@ -227,16 +227,17 @@ static void free_stack_idx(int idx)
  * Should be called with wel_mutex lock and unlock mutex
  * only after all actions with entry will be performed.
  */
-struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
+static struct watch_entry *key_to_watcher(const char *key, bool complete, const char *token,
+					  struct xen_domain *domain)
 {
 	struct watch_entry *iter;
 	size_t keyl = strlen(key);
 
 	SYS_DLIST_FOR_EACH_CONTAINER (&watch_entry_list, iter, node) {
-		if ((!complete || strlen(key) == strlen(iter->key)) &&
+		if (iter->domain == domain &&
+		    (!complete || strlen(key) == strlen(iter->key)) &&
 		    memcmp(iter->key, key, keyl) == 0 &&
-		    (token == NULL || strlen(token) == 0 ||
-		     0 == memcmp(iter->token, token, strlen(iter->token)))) {
+		    (token == NULL || strlen(token) == 0 || strcmp(iter->token, token) == 0)) {
 			return iter;
 		}
 	}
@@ -606,7 +607,7 @@ static int fire_watcher(struct xen_domain *domain, char *pending_path)
 		size_t token_len, payload_len;
 		size_t epath_len = pendkey_len + 1;
 
-		if ((iter->domain->domid != domain->domid) ||
+		if (!iter->domain || (iter->domain->domid != domain->domid) ||
 		     memcmp(iter->key, epath_buf, strlen(iter->key))) {
 			continue;
 		}
@@ -1600,7 +1601,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 
 	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
-	wentry = key_to_watcher(path, true, token);
+	wentry = key_to_watcher(path, true, token, domain);
 
 	if (wentry) {
 		/* Same watch, different path form */
@@ -1714,7 +1715,7 @@ static void handle_unwatch(struct xenstore *xenstore, uint32_t id,
 
 	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
-	entry = key_to_watcher(path, true, token);
+	entry = key_to_watcher(path, true, token, domain);
 	k_free(path);
 	if (entry) {
 		if (entry->domain == domain) {
