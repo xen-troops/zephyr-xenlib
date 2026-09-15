@@ -96,6 +96,53 @@ static sys_dlist_t pending_watch_event_list =
 
 static struct xs_entry root_xenstore;
 
+static bool xenstore_path_char_is_valid(char c)
+{
+	return ((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) ||
+	       ((c >= '0') && (c <= '9')) || c == '-' || c == '_' ||
+	       c == '@' || c == '/';
+}
+
+static int xenstore_path_validate(const char *path)
+{
+	char prev = '\0';
+	size_t path_len;
+	size_t max_path_len;
+
+	if (!path || path[0] == '\0') {
+		return -EINVAL;
+	}
+
+	if (xenstore_is_root_path(path)) {
+		return 0;
+	}
+
+	for (size_t i = 0; path[i] != '\0'; i++) {
+		if (!xenstore_path_char_is_valid(path[i])) {
+			return -EINVAL;
+		}
+
+		if (path[i] == '/' && prev == '/') {
+			return -EINVAL;
+		}
+
+		prev = path[i];
+	}
+
+	if (prev == '/') {
+		return -EINVAL;
+	}
+
+	path_len = xenstore_str_byte_size(path);
+	max_path_len = xenstore_is_abs_path(path) ? XENSTORE_ABS_PATH_MAX :
+						    XENSTORE_REL_PATH_MAX;
+	if (path_len > max_path_len) {
+		return -E2BIG;
+	}
+
+	return 0;
+}
+
 struct message_handle {
 	void (*h)(struct xenstore *xenstore, uint32_t id, char *payload, uint32_t sz);
 };
@@ -180,15 +227,15 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 	return NULL;
 }
 
-
-static int construct_path(char *payload, uint32_t domid, char **path)
+static int construct_path(const char *payload, uint32_t domid, char **path)
 {
 	size_t path_len = xenstore_str_byte_size(payload);
+	int rc;
+	int len;
 
-	if (path_len > XENSTORE_ABS_PATH_MAX) {
-		LOG_ERR("Invalid path len (path len = %zu, max = %d)",
-			path_len, XENSTORE_ABS_PATH_MAX);
-		return -ENOMEM;
+	rc = xenstore_path_validate(payload);
+	if (rc) {
+		return rc;
 	}
 
 	*path = k_malloc(path_len + XENSTORE_MAX_LOCALPATH_LEN);
@@ -200,8 +247,17 @@ static int construct_path(char *payload, uint32_t domid, char **path)
 	if (xenstore_is_abs_path(payload)) {
 		memcpy(*path, payload, path_len);
 	} else {
-		snprintf(*path, path_len + XENSTORE_MAX_LOCALPATH_LEN,
-			 "/local/domain/%d/%s", domid, payload);
+		len = snprintf(*path, path_len + XENSTORE_MAX_LOCALPATH_LEN,
+			       "/local/domain/%d/%s", domid, payload);
+		if (len < 0) {
+			k_free(*path);
+			return -EINVAL;
+		}
+
+		if ((size_t)len + 1 > XENSTORE_ABS_PATH_MAX) {
+			k_free(*path);
+			return -E2BIG;
+		}
 	}
 
 	return 0;
@@ -1460,8 +1516,8 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	 * with '\0', so we can find path len with strnlen here.
 	 */
 	path_len = strnlen(payload, len) + 1;
-	if (path_len > XENSTORE_ABS_PATH_MAX) {
-		rc = -ENOMEM;
+	if (path_len > (path_is_relative ? XENSTORE_REL_PATH_MAX : XENSTORE_ABS_PATH_MAX)) {
+		rc = -E2BIG;
 		goto path_fail;
 	}
 
@@ -2021,6 +2077,7 @@ int xs_init(void)
 ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
 			k_timeout_t tout)
 {
+	char *local_path;
 	const char *value;
 	size_t value_len;
 	struct xs_entry *entry;
@@ -2034,13 +2091,20 @@ ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
 		return -ENOTSUP;
 	}
 
-	rc = k_mutex_lock(&xsel_mutex, tout);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
+
+	rc = k_mutex_lock(&xsel_mutex, tout);
+	if (rc) {
+		k_free(local_path);
+		return rc;
+	}
+	entry = key_to_entry_check_perm(local_path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(local_path);
 		return -ENOENT;
 	}
 
@@ -2051,6 +2115,7 @@ ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
 	}
 
 	k_mutex_unlock(&xsel_mutex);
+	k_free(local_path);
 
 	return value_len;
 }
@@ -2061,6 +2126,7 @@ int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_time
 		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
+	char *local_path;
 	int rc;
 
 	if (!path || !value) {
@@ -2071,18 +2137,26 @@ int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_time
 		return -ENOTSUP;
 	}
 
-	rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (rc) {
 		return rc;
 	}
 
-	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+	rc = xss_do_write(local_path, value, XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
+	if (rc) {
+		k_free(local_path);
+		return rc;
+	}
+
+	notify_watchers(local_path, XENSTORE_LOCAL_DOMAIN_ID);
+	k_free(local_path);
 
 	return 0;
 }
 
 int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 {
+	char *local_path;
 	int ret;
 
 	if (!path) {
@@ -2093,12 +2167,19 @@ int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return -ENOTSUP;
 	}
 
-	ret = xss_do_rm(path, XENSTORE_LOCAL_DOMAIN_ID, tout);
+	ret = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (ret) {
 		return ret;
 	}
 
-	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+	ret = xss_do_rm(local_path, XENSTORE_LOCAL_DOMAIN_ID, tout);
+	if (ret) {
+		k_free(local_path);
+		return ret;
+	}
+
+	notify_watchers(local_path, XENSTORE_LOCAL_DOMAIN_ID);
+	k_free(local_path);
 
 	return 0;
 }
@@ -2107,6 +2188,7 @@ ssize_t xs_directory_timeout(const char *path, char *buf, size_t len, uint32_t t
 			     k_timeout_t tout)
 {
 	struct xs_entry *entry, *iter;
+	char *local_path;
 	size_t reply_sz = 0;
 	size_t used = 0;
 	int rc;
@@ -2119,13 +2201,20 @@ ssize_t xs_directory_timeout(const char *path, char *buf, size_t len, uint32_t t
 		return -ENOTSUP;
 	}
 
-	rc = k_mutex_lock(&xsel_mutex, tout);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
+
+	rc = k_mutex_lock(&xsel_mutex, tout);
+	if (rc) {
+		k_free(local_path);
+		return rc;
+	}
+	entry = key_to_entry_check_perm(local_path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(local_path);
 		return -ENOENT;
 	}
 
@@ -2149,6 +2238,7 @@ ssize_t xs_directory_timeout(const char *path, char *buf, size_t len, uint32_t t
 	}
 
 	k_mutex_unlock(&xsel_mutex);
+	k_free(local_path);
 
 	return reply_sz;
 }
@@ -2158,6 +2248,7 @@ ssize_t xs_get_permissions_timeout(const char *path, struct xs_perm_entry *perms
 {
 	struct xs_entry *entry;
 	struct xs_permissions *iter;
+	char *local_path;
 	size_t total = 0;
 	size_t used = 0;
 	int rc;
@@ -2170,13 +2261,20 @@ ssize_t xs_get_permissions_timeout(const char *path, struct xs_perm_entry *perms
 		return -ENOTSUP;
 	}
 
-	rc = k_mutex_lock(&xsel_mutex, tout);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
+
+	rc = k_mutex_lock(&xsel_mutex, tout);
+	if (rc) {
+		k_free(local_path);
+		return rc;
+	}
+	entry = key_to_entry_check_perm(local_path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(local_path);
 		return -ENOENT;
 	}
 
@@ -2190,6 +2288,7 @@ ssize_t xs_get_permissions_timeout(const char *path, struct xs_perm_entry *perms
 	}
 
 	k_mutex_unlock(&xsel_mutex);
+	k_free(local_path);
 
 	return total;
 }
@@ -2198,6 +2297,7 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 			       size_t perms_num, uint32_t tx_id, k_timeout_t tout)
 {
 	struct xs_entry *entry;
+	char *local_path;
 	int rc;
 
 	if (!path || !perms || perms_num == 0) {
@@ -2208,18 +2308,26 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 		return -ENOTSUP;
 	}
 
-	rc = k_mutex_lock(&xsel_mutex, tout);
+	rc = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_NONE);
+
+	rc = k_mutex_lock(&xsel_mutex, tout);
+	if (rc) {
+		k_free(local_path);
+		return rc;
+	}
+	entry = key_to_entry_check_perm(local_path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_NONE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(local_path);
 		return -ENOENT;
 	}
 
 	rc = set_perms_by_array(entry, perms, perms_num);
 	k_mutex_unlock(&xsel_mutex);
+	k_free(local_path);
 
 	return rc;
 }
@@ -2230,6 +2338,7 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
+	char *local_path;
 	int ret;
 
 	if (!path) {
@@ -2240,12 +2349,19 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return -ENOTSUP;
 	}
 
-	ret = xss_do_write(path, "", XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
+	ret = construct_path(path, XENSTORE_LOCAL_DOMAIN_ID, &local_path);
 	if (ret) {
 		return ret;
 	}
 
-	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
+	ret = xss_do_write(local_path, "", XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
+	if (ret) {
+		k_free(local_path);
+		return ret;
+	}
+
+	notify_watchers(local_path, XENSTORE_LOCAL_DOMAIN_ID);
+	k_free(local_path);
 
 	return 0;
 }
