@@ -470,7 +470,7 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 	rc = construct_path(payload, xenstore->domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -498,7 +498,7 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 	dir_list = k_malloc(reply_sz);
 	if (!dir_list) {
 		LOG_ERR("Failed to allocate memory for dir list");
-		send_reply(xenstore, id, XS_ERROR, "ENOMEM");
+		send_errno(xenstore, id, ENOMEM);
 		k_mutex_unlock(&xsel_mutex);
 		return;
 	}
@@ -1161,7 +1161,7 @@ static void _handle_write(struct xenstore *xenstore, uint32_t id,
 	rc = construct_path(payload, domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -1174,7 +1174,7 @@ static void _handle_write(struct xenstore *xenstore, uint32_t id,
 	rc = xss_do_write(path, data, domain->domid, NULL, 0, K_FOREVER);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		goto free_data;
 	}
 
@@ -1288,7 +1288,7 @@ static void handle_get_perms(struct xenstore *xenstore, uint32_t id,
 	rc = construct_path(payload, xenstore->domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -1297,14 +1297,14 @@ static void handle_get_perms(struct xenstore *xenstore, uint32_t id,
 	k_free(path);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
-		send_reply(xenstore, id, XS_ERROR, "ENOENT");
+		send_errno(xenstore, id, ENOENT);
 		return;
 	}
 
 	perm_str = serialize_perms(entry, &ret_size);
 	k_mutex_unlock(&xsel_mutex);
 	if (!perm_str) {
-		send_reply(xenstore, id, XS_ERROR, "ENOENT");
+		send_errno(xenstore, id, ENOENT);
 		return;
 	}
 
@@ -1336,7 +1336,7 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	rc = construct_path(payload, xenstore->domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -1351,7 +1351,7 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	rc = set_perms_by_strings(entry, perm_string, perms_str_size);
 	k_mutex_unlock(&xsel_mutex);
 	if (rc) {
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -1383,7 +1383,7 @@ static void handle_read(struct xenstore *xenstore, uint32_t id, char *payload,
 	rc = construct_path(payload, xenstore->domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
@@ -1461,6 +1461,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	 */
 	path_len = strnlen(payload, len) + 1;
 	if (path_len > XENSTORE_ABS_PATH_MAX) {
+		rc = -ENOMEM;
 		goto path_fail;
 	}
 
@@ -1538,8 +1539,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	return;
 
 path_fail:
-	LOG_ERR("Failed to add watch for %s, path is too long", payload);
-	send_reply(xenstore, id, XS_ERROR, "ENOMEM");
+	send_errno(xenstore, id, -rc);
 
 	return;
 
@@ -1551,7 +1551,7 @@ wentry_fail:
 	k_free(path);
 	LOG_WRN("Failed to create watch for Domain#%d, no memory",
 		domain->domid);
-	send_reply(xenstore, id, XS_ERROR, "ENOMEM");
+	send_errno(xenstore, id, ENOMEM);
 
 	return;
 
@@ -1581,7 +1581,7 @@ static void handle_unwatch(struct xenstore *xenstore, uint32_t id,
 	rc = construct_path(payload, domain->domid, &path);
 	if (rc) {
 		LOG_ERR("Failed to construct path (rc=%d)", rc);
-		send_errno(xenstore, id, rc);
+		send_errno(xenstore, id, -rc);
 		return;
 	}
 
