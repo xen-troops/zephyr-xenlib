@@ -36,6 +36,7 @@ LOG_MODULE_REGISTER(xenstore);
 #define UINT32_MAX_STR_LEN 11
 /* max length of string that holds '/local/domain/%domid/' (domid 0-32767) */
 #define XENSTORE_MAX_LOCALPATH_LEN	21
+#define XENSTORE_LOCAL_DOMAIN_ID	0
 
 #define XENSTORE_STACK_SIZE_PER_DOM	4096
 /*
@@ -222,7 +223,7 @@ static bool check_perms(struct xs_entry *entry, uint32_t perms, uint32_t caller_
 	struct xs_permissions *iter, *default_perms;
 
 	/* Caller is Dom0 or owner */
-	if (caller_domid == 0 || is_owner(entry, caller_domid)) {
+	if (caller_domid == XENSTORE_LOCAL_DOMAIN_ID || is_owner(entry, caller_domid)) {
 		return true;
 	}
 
@@ -903,7 +904,7 @@ int xss_write(const char *path, const char *value)
 {
 	int rc;
 	struct xs_perm_entry perms = {
-		.domid = 0,
+		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
 
@@ -912,11 +913,11 @@ int xss_write(const char *path, const char *value)
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, &perms, 1, K_FOREVER);
+	rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, K_FOREVER);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -935,11 +936,11 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, &perms, 1, K_FOREVER);
+	rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, K_FOREVER);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -951,7 +952,7 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	int rc;
 	struct xs_perm_entry perms[2] = {
 		{
-			.domid = 0,
+			.domid = XENSTORE_LOCAL_DOMAIN_ID,
 			.perm = XS_PERM_NONE,
 		},
 		{
@@ -969,15 +970,15 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	 * If the function is invoked for Dom0, there is
 	 * no need to set additionally read permission.
 	 */
-	if (domid == 0) {
-		rc = xss_do_write(path, value, 0, perms, 1, K_FOREVER);
+	if (domid == XENSTORE_LOCAL_DOMAIN_ID) {
+		rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, perms, 1, K_FOREVER);
 	} else {
-		rc = xss_do_write(path, value, 0, perms, 2, K_FOREVER);
+		rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, perms, 2, K_FOREVER);
 	}
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -1003,12 +1004,12 @@ int xss_write_guest_with_permissions(const char *path, const char *value, uint32
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, perms, 2, K_FOREVER);
+	rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, perms, 2, K_FOREVER);
 
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -1020,7 +1021,7 @@ int xss_read(const char *path, char *value, size_t len)
 	struct xs_entry *entry;
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (entry) {
 		if (entry->value) {
 			strncpy(value, entry->value, len);
@@ -1104,7 +1105,7 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	};
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_NONE);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_NONE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -1424,10 +1425,10 @@ static int xss_do_rm(const char *key, uint32_t caller_id, k_timeout_t tout)
 
 int xss_rm(const char *path)
 {
-	int ret = xss_do_rm(path, 0, K_FOREVER);
+	int ret = xss_do_rm(path, XENSTORE_LOCAL_DOMAIN_ID, K_FOREVER);
 
 	if (!ret) {
-		notify_watchers(path, 0);
+		notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 	}
 
 	return ret;
@@ -2002,7 +2003,7 @@ int stop_domain_stored(struct xen_domain *domain)
 int xs_init_root(void)
 {
 	struct xs_perm_entry permissions = {
-		.domid = 0,
+		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
 
@@ -2037,7 +2038,7 @@ ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -2057,7 +2058,7 @@ ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
 int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_timeout_t tout)
 {
 	struct xs_perm_entry perms = {
-		.domid = 0,
+		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
 	int rc;
@@ -2070,12 +2071,12 @@ int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_time
 		return -ENOTSUP;
 	}
 
-	rc = xss_do_write(path, value, 0, &perms, 1, tout);
+	rc = xss_do_write(path, value, XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
 	if (rc) {
 		return rc;
 	}
 
-	notify_watchers(path, 0);
+	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 
 	return 0;
 }
@@ -2092,12 +2093,12 @@ int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return -ENOTSUP;
 	}
 
-	ret = xss_do_rm(path, 0, tout);
+	ret = xss_do_rm(path, XENSTORE_LOCAL_DOMAIN_ID, tout);
 	if (ret) {
 		return ret;
 	}
 
-	notify_watchers(path, 0);
+	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 
 	return 0;
 }
@@ -2122,7 +2123,7 @@ ssize_t xs_directory_timeout(const char *path, char *buf, size_t len, uint32_t t
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -2173,7 +2174,7 @@ ssize_t xs_get_permissions_timeout(const char *path, struct xs_perm_entry *perms
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_READ);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -2211,7 +2212,7 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 	if (rc) {
 		return rc;
 	}
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_NONE);
+	entry = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID, XS_PERM_NONE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -2226,7 +2227,7 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 {
 	struct xs_perm_entry perms = {
-		.domid = 0,
+		.domid = XENSTORE_LOCAL_DOMAIN_ID,
 		.perm = XS_PERM_NONE,
 	};
 	int ret;
@@ -2239,12 +2240,12 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout)
 		return -ENOTSUP;
 	}
 
-	ret = xss_do_write(path, "", 0, &perms, 1, tout);
+	ret = xss_do_write(path, "", XENSTORE_LOCAL_DOMAIN_ID, &perms, 1, tout);
 	if (ret) {
 		return ret;
 	}
 
-	notify_watchers(path, 0);
+	notify_watchers(path, XENSTORE_LOCAL_DOMAIN_ID);
 
 	return 0;
 }
