@@ -25,7 +25,11 @@ extern "C" {
 /**
  * @brief Set the default timeout used by non-timeout API variants.
  *
- * @param[in]     tout       Default timeout for operations that wait for a XenStore reply.
+ * Timeout values limit implementation blocking waits. They are not a strict
+ * wall-clock limit for the whole API call and do not cover user watch
+ * callbacks.
+ *
+ * @param[in]     tout       Default timeout for blocking waits.
  */
 void xs_set_default_timeout(k_timeout_t tout);
 
@@ -51,7 +55,7 @@ int xs_init(void);
  * @param[in]     len        Size of @p buf in bytes.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE outside a
  *                           transaction.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @return Value length in bytes on success, even when @p buf is too small.
  * @retval -errno on failure.
@@ -83,7 +87,7 @@ ssize_t xs_read(const char *path, char *buf, size_t len, uint32_t tx_id);
  * @param[in]     path       XenStore path.
  * @param[in]     value      NUL-terminated value to write.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @retval 0 on success.
  * @retval -errno on failure.
@@ -107,7 +111,7 @@ int xs_write(const char *path, const char *value, uint32_t tx_id);
  *
  * @param[in]     path       XenStore path to remove.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @retval 0 on success.
  * @retval -errno on failure.
@@ -140,7 +144,7 @@ int xs_rm(const char *path, uint32_t tx_id);
  *                           @p len is 0 and the caller only needs the required length.
  * @param[in]     len        Size of @p buf in bytes.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @return Directory stream length in bytes on success, even when @p buf is too
  *         small.
@@ -183,7 +187,7 @@ ssize_t xs_directory(const char *path, char *buf, size_t len, uint32_t tx_id);
  *                           count.
  * @param[in]     perms_num  Number of entries available in @p perms.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @return Total number of permission entries on success, even when @p perms is
  *         too small.
@@ -220,7 +224,7 @@ ssize_t xs_get_permissions(const char *path, struct xs_perm_entry *perms, size_t
  * @param[in]     perms      Permission entries to store.
  * @param[in]     perms_num  Number of entries in @p perms.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @retval 0 on success.
  * @retval -errno on failure.
@@ -248,7 +252,7 @@ int xs_set_permissions(const char *path, const struct xs_perm_entry *perms, size
  *
  * @param[in]     path       XenStore path to create.
  * @param[in]     tx_id      Transaction identifier, or XS_TRANSACTION_NONE.
- * @param[in]     tout       Maximum time to wait for the operation.
+ * @param[in]     tout       Maximum time for implementation blocking waits.
  *
  * @retval 0 on success.
  * @retval -errno on failure.
