@@ -144,6 +144,27 @@ static int xenstore_path_validate(const char *path)
 	return 0;
 }
 
+static bool xenstore_path_contains(const char *parent, const char *child)
+{
+	size_t parent_len;
+
+	if (!parent || !child) {
+		return false;
+	}
+
+	if (strcmp(parent, child) == 0) {
+		return true;
+	}
+
+	if (xenstore_is_root_path(parent)) {
+		return child[0] != '\0';
+	}
+
+	parent_len = strlen(parent);
+
+	return strncmp(parent, child, parent_len) == 0 && child[parent_len] == '/';
+}
+
 static int xss_mutex_lock_deadline(struct k_mutex *mutex, k_timepoint_t deadline)
 {
 	int rc;
@@ -972,7 +993,8 @@ static int queue_pending_watch_event(struct xen_domain *domain, const char *path
 	return 0;
 }
 
-static int queue_watch_notifications_xsel_locked(const char *path, k_timepoint_t deadline)
+static int queue_watch_notifications_xsel_locked(const char *path, bool recursive_remove,
+						 k_timepoint_t deadline)
 {
 	struct watch_entry *iter;
 	int rc;
@@ -983,15 +1005,21 @@ static int queue_watch_notifications_xsel_locked(const char *path, k_timepoint_t
 	}
 
 	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
-		if (strncmp(iter->key, path, strlen(iter->key))) {
+		const char *event_path = path;
+
+		if (xenstore_path_contains(iter->key, path)) {
+			event_path = path;
+		} else if (recursive_remove && xenstore_path_contains(path, iter->key)) {
+			event_path = iter->key;
+		} else {
 			continue;
 		}
 
-		if (!key_to_entry_check_perm(path, iter->domain->domid, XS_PERM_READ)) {
+		if (!key_to_entry_check_perm(event_path, iter->domain->domid, XS_PERM_READ)) {
 			continue;
 		}
 
-		if (queue_pending_watch_event(iter->domain, path, deadline)) {
+		if (queue_pending_watch_event(iter->domain, event_path, deadline)) {
 			break;
 		}
 	}
@@ -1008,7 +1036,7 @@ static int notify_watchers_deadline(const char *path, k_timepoint_t deadline)
 	if (rc) {
 		return rc;
 	}
-	rc = queue_watch_notifications_xsel_locked(path, deadline);
+	rc = queue_watch_notifications_xsel_locked(path, false, deadline);
 	k_mutex_unlock(&xsel_mutex);
 
 	return rc;
@@ -1536,7 +1564,7 @@ static int xss_do_rm_deadline(const char *key, uint32_t caller_id, k_timepoint_t
 		return -EINVAL;
 	}
 
-	rc = queue_watch_notifications_xsel_locked(key, deadline);
+	rc = queue_watch_notifications_xsel_locked(key, true, deadline);
 	if (rc) {
 		k_mutex_unlock(&xsel_mutex);
 		return rc;
