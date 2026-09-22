@@ -463,6 +463,10 @@ typedef uint64_t xen_callback_t;
 #define GUEST_GICV3_GICR0_BASE     xen_mk_ullong(0x03020000) /* vCPU0..127 */
 #define GUEST_GICV3_GICR0_SIZE     xen_mk_ullong(0x01000000)
 
+/* vsmmuv3 MMIO mappings */
+#define GUEST_VSMMUV3_BASE     xen_mk_ullong(0x04040000)
+#define GUEST_VSMMUV3_SIZE     xen_mk_ullong(0x00020000)
+
 /*
  * 256 MB is reserved for VPCI configuration space based on calculation
  * 256 buses x 32 devices x 8 functions x 4 KB = 256 MB
@@ -532,6 +536,8 @@ typedef uint64_t xen_callback_t;
 
 #define GUEST_VIRTIO_MMIO_SPI_FIRST   33
 #define GUEST_VIRTIO_MMIO_SPI_LAST    43
+
+#define GUEST_VSMMU_SPI         44
 
 /*
  * SGI is the preferred delivery mechanism of FF-A pending notifications or
