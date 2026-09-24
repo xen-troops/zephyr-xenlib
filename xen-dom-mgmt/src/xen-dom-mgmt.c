@@ -63,6 +63,15 @@ static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 
 	arch_cfg->gic_version = dom_cfg->gic_version;
 	arch_cfg->tee_type = dom_cfg->tee_type;
+	arch_cfg->viommu_type = dom_cfg->viommu_type;
+
+	/*
+	 * If smmuv3 viommu is enabled then increment the nr_spis to allow
+	 * allocation of SPI VIRQ for VSMMU.
+	 */
+	if (dom_cfg->viommu_type == XEN_DOMCTL_CONFIG_VIOMMU_SMMUV3) {
+		max_irq = max(max_irq, GUEST_VSMMU_SPI - 32 + 1);
+	}
 
 	/*
 	 * xen_arch_domainconfig 'nr_spis' should be >= than biggest

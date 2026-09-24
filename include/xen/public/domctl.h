@@ -1285,12 +1285,14 @@ struct xen_domctl_get_domain_state {
  * XEN_DOMCTL_viommu_alloc_vsid_range
  *
  * Allocate guest vSID range and
- * establish pSID->vSID mapping for target range.
+ * establish pSID->vSID mapping for target range and physical IOMMU (phandle).
  * Allocated range is continous
  */
 struct xen_domctl_viommu_alloc_vsid_range {
     /* IN: Range first pSID  */
     uint32_t first_psid;
+    /* IN: Physical IOMMU phandle behind which the target device streams are configured */
+    uint32_t phandle;
     /* IN: Number of vSIDs to allocate */
     uint16_t nr_sids;
     /* padding, must be 0 */

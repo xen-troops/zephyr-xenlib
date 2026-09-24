@@ -153,6 +153,7 @@ struct xen_domain_cfg {
 	/* ARM arch related */
 	uint8_t gic_version;
 	uint16_t tee_type;
+	uint8_t viommu_type;
 
 	/* For peripheral sharing*/
 	struct xen_domain_iomem *iomems;
