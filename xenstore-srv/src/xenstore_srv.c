@@ -1987,7 +1987,7 @@ int start_domain_stored(struct xen_domain *domain, xen_pfn_t store_pfn)
 	if (IS_ENABLED(CONFIG_THREAD_NAME)) {
 		char name[CONFIG_THREAD_MAX_NAME_LEN];
 
-		snprintk(name, sizeof(name), "xenstore-d%u", domain->domid);
+		snprintf(name, sizeof(name), "xenstore-d%u", domain->domid);
 		k_thread_name_set(&xenstore->thrd, name);
 	}
 
