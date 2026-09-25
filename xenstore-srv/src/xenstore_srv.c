@@ -1196,7 +1196,7 @@ static int queue_watch_notifications_xsel_locked(const char *path, bool recursiv
 	size_t loc_len;
 	int rc;
 
-	loc_len = snprintk(local, sizeof(local), "/local/domain/%d/", XENSTORE_LOCAL_DOMAIN_ID);
+	loc_len = snprintf(local, sizeof(local), "/local/domain/%d/", XENSTORE_LOCAL_DOMAIN_ID);
 	__ASSERT_NO_MSG(loc_len < sizeof(local));
 
 	rc = xss_mutex_lock_deadline(&wel_mutex, deadline);
@@ -2302,7 +2302,7 @@ int start_domain_stored(struct xen_domain *domain, xen_pfn_t store_pfn)
 	if (IS_ENABLED(CONFIG_THREAD_NAME)) {
 		char name[CONFIG_THREAD_MAX_NAME_LEN];
 
-		snprintk(name, sizeof(name), "xenstore-d%u", domain->domid);
+		snprintf(name, sizeof(name), "xenstore-d%u", domain->domid);
 		k_thread_name_set(&xenstore->thrd, name);
 	}
 
