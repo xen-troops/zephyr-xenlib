@@ -8,21 +8,11 @@ on:
 
 env:
   sdk_version: ${{ vars.SDK_VERSION || '1.0.1' }}
-  aos_revision: ${{ vars.AOS_REVISION || 'main' }}
-  zephyr_revision: ${{ vars.ZEPHYR_REVISION || 'wip_dom0-xt_qemu' }}
+  zephyr_revision: ${{ vars.ZEPHYR_REVISION || 'main' }}
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        target: [rcar_spider_s4/r8a779f0/a55, rcar_salvator_xs, rcar_h3ulcb/r8a77951/a57, qemu_cortex_a53]
-        project: [zephyr-dom0-xt, aos-core-zephyr]
-        exclude:
-          # This is temporary, AoS currently does not support Zephyr v3.6.0
-          - project: aos-core-zephyr
-          - target: qemu_cortex_a53
-            project: aos-core-zephyr
     steps:
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -56,25 +46,16 @@ jobs:
           cd sdk/zephyr-sdk-${{ env.sdk_version }}
           ./setup.sh -t all -h -c
 
-      - name: Clone zephyr-dom0-xt
+      - name: Check out Zephyr
         uses: actions/checkout@v4
-        if: matrix.project == 'zephyr-dom0-xt'
         with:
-          repository: xen-troops/zephyr-dom0-xt
+          repository: zephyrproject-rtos/zephyr
           ref: ${{ env.zephyr_revision }}
-          path: zephyr-dom0-xt
-
-      - name: Clone aos-core-zephyr
-        uses: actions/checkout@v4
-        if: matrix.project == 'aos-core-zephyr'
-        with:
-          repository: aoscloud/aos_core_zephyr
-          ref: ${{ env.aos_revision }}
-          path: aos-core-zephyr
+          path: zephyr
 
       - name: Environment setup
         run: |
-          west init -l ${{ matrix.project }}
+          west init -l zephyr
           west update
 
       - name: Check out zephyr-xenlib
@@ -82,19 +63,12 @@ jobs:
         with:
           path: zephyr-xenlib
 
-      - name: Build zephyr-dom0-xt
-        if: matrix.project == 'zephyr-dom0-xt'
+      - name: Build zephyr-xenlib
         run: |
-          west build -p always -b ${{ matrix.target }} zephyr-dom0-xt -S xen_dom0
-
-      - name: Build aos-core-zephyr
-        if: matrix.project == 'aos-core-zephyr'
-        run: |
-          touch u-boot.bin
-          touch dtb.dtb
-          touch rootca.pem
-          west build -p always -b ${{ matrix.target }} aos-core-zephyr -S xen_dom0 \
-            -D'CONFIG_DOMD_UBOOT_PATH="../u-boot.bin"' \
-            -D'CONFIG_DOMD_DTB_PATH="../dtb.dtb"' \
-            -D'CONFIG_AOS_ROOT_CA_PATH="../rootca.pem"'
+          west build -p always -b qemu_cortex_a53/qemu_cortex_a53/smp \
+            zephyr/samples/hello_world \
+            -S xen-dom0 -- \
+            -DZEPHYR_EXTRA_MODULES="${GITHUB_WORKSPACE}/zephyr-xenlib" \
+            -DDTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/zephyr-xenlib/.github/ci/qemu_cortex_a53.overlay" \
+            -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/zephyr-xenlib/.github/ci/zephyr-xenlib.conf"
 

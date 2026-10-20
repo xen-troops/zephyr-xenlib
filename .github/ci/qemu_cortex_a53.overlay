@@ -1,0 +1,12 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	hypervisor: hypervisor@38000000 {
+		compatible = "xen,xen";
+		reg = <0x00 0x38000000 0x00 0x1000000>;
+		interrupts = <GIC_PPI 0x00 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		interrupt-parent = <&gic>;
+	};
+};
