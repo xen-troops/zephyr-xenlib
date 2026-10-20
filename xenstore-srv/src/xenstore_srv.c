@@ -81,15 +81,15 @@ struct watch_entry {
 
 	/* Holds callback state used only by server-local control-domain clients. */
 	struct xs_watcher local_watcher;
-	/* Keeps the whole entry alive while a local callback is pending or running. */
+	/* Keeps the whole entry alive while an event is pending or being dispatched. */
 	struct sys_ref ref;
 
 	sys_dnode_t node;
 };
 
 struct pending_watch_event_entry {
-	char *key;
-	struct xen_domain *domain;
+	char *event_path;
+	struct watch_entry *watch;
 
 	sys_dnode_t node;
 };
@@ -628,57 +628,56 @@ static void handle_directory(struct xenstore *xenstore, uint32_t id,
 	k_free(dir_list);
 }
 
-static int fire_watcher(struct xen_domain *domain, char *pending_path)
+static int fire_watcher(struct pending_watch_event_entry *event)
 {
-	struct watch_entry *iter;
+	struct watch_entry *watch = event->watch;
+	struct xen_domain *domain = watch->domain;
+	char *pending_path = event->event_path;
 	char local[XENSTORE_MAX_LOCALPATH_LEN];
 	size_t pendkey_len, loc_len;
+	char *payload, *epath_buf = pending_path;
+	size_t token_len, payload_len;
+	size_t epath_len;
+
+	/* An unwatch removes the entry from the registry before this event is sent. */
+	if (!sys_dnode_is_linked(&watch->node)) {
+		return 0;
+	}
 
 	pendkey_len = strlen(pending_path);
+	epath_len = pendkey_len + 1;
 
 	loc_len = snprintf(local, sizeof(local), "/local/domain/%d/",
 			   domain->domid);
 	__ASSERT_NO_MSG(loc_len < sizeof(local));
 
-	/* This function should be called when we already hold wel_mutex */
-	SYS_DLIST_FOR_EACH_CONTAINER(&watch_entry_list, iter, node) {
-		char *payload, *epath_buf = pending_path;
-		size_t token_len, payload_len;
-		size_t epath_len = pendkey_len + 1;
-
-		if (!iter->domain || (iter->domain->domid != domain->domid) ||
-		     memcmp(iter->key, epath_buf, strlen(iter->key))) {
-			continue;
-		}
-
-		if (domain->xenstore.used_out_bufs > XENSTORE_MAX_OUT_BUF_NUM - 1) {
-			return -ENOMEM;
-		}
-
-		token_len = strlen(iter->token);
-		payload_len = token_len + 1;
-
-		if (iter->is_relative) {
-			/* Send relative part (after "/local/domain/#domid") */
-			epath_buf += loc_len;
-			epath_len -= loc_len;
-		}
-		payload_len += epath_len;
-
-		payload = k_malloc(payload_len);
-		if (!payload) {
-			return -ENOMEM;
-		}
-
-		memset(payload, 0, payload_len);
-		/* Need to pack payload as "<epath>|<token>|" */
-		memcpy(payload, epath_buf, epath_len);
-		memcpy(payload + epath_len, iter->token, token_len);
-
-		send_reply_sz(&domain->xenstore, 0, XS_WATCH_EVENT, payload, payload_len);
-
-		k_free(payload);
+	if (domain->xenstore.used_out_bufs > XENSTORE_MAX_OUT_BUF_NUM - 1) {
+		return -ENOMEM;
 	}
+
+	token_len = strlen(watch->token);
+	payload_len = token_len + 1;
+
+	if (watch->is_relative) {
+		/* Send relative part (after "/local/domain/#domid") */
+		epath_buf += loc_len;
+		epath_len -= loc_len;
+	}
+	payload_len += epath_len;
+
+	payload = k_malloc(payload_len);
+	if (!payload) {
+		return -ENOMEM;
+	}
+
+	memset(payload, 0, payload_len);
+	/* Need to pack payload as "<epath>|<token>|" */
+	memcpy(payload, epath_buf, epath_len);
+	memcpy(payload + epath_len, watch->token, token_len);
+
+	send_reply_sz(&domain->xenstore, 0, XS_WATCH_EVENT, payload, payload_len);
+
+	k_free(payload);
 
 	return 0;
 }
@@ -1035,10 +1034,11 @@ static void dispatch_local_watch_events_locked(sys_dlist_t *local_events)
 	}
 }
 
-static int queue_pending_watch_event(struct xen_domain *domain, const char *path,
+static int queue_pending_watch_event(struct watch_entry *watch, const char *path,
 				     k_timepoint_t deadline)
 {
 	struct pending_watch_event_entry *pentry;
+	struct xen_domain *domain = watch->domain;
 	int rc;
 
 	pentry = k_malloc(sizeof(*pentry));
@@ -1048,21 +1048,23 @@ static int queue_pending_watch_event(struct xen_domain *domain, const char *path
 		return -ENOMEM;
 	}
 
-	pentry->key = k_malloc(xenstore_str_byte_size(path));
-	if (!pentry->key) {
+	pentry->event_path = k_malloc(xenstore_str_byte_size(path));
+	if (!pentry->event_path) {
 		k_free(pentry);
 		LOG_WRN("Failed to notify Domain#%d about path %s, no memory",
 			domain->domid, path);
 		return -ENOMEM;
 	}
 
-	strcpy(pentry->key, path);
-	pentry->domain = domain;
+	strcpy(pentry->event_path, path);
+	pentry->watch = watch;
+	sys_ref_get(&watch->ref);
 
 	sys_dnode_init(&pentry->node);
 	rc = xss_mutex_lock_deadline(&pfl_mutex, deadline);
 	if (rc) {
-		k_free(pentry->key);
+		watch_entry_put(watch);
+		k_free(pentry->event_path);
 		k_free(pentry);
 		return rc;
 	}
@@ -1124,7 +1126,7 @@ static int queue_watch_notifications_xsel_locked(const char *path, bool recursiv
 			continue;
 		}
 
-		rc = queue_pending_watch_event(iter->domain, event_path, deadline);
+		rc = queue_pending_watch_event(iter, event_path, deadline);
 		if (rc) {
 			/*
 			 * Keep allocation failures best-effort, but propagate pending-list
@@ -1479,18 +1481,19 @@ static void process_pending_watch_events(struct xen_domain *domain)
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&pending_watch_event_list, iter, next, node) {
 		int rc;
 
-		if (domain != iter->domain) {
+		if (domain != iter->watch->domain) {
 			continue;
 		}
 
-		rc = fire_watcher(domain, iter->key);
+		rc = fire_watcher(iter);
 		if (rc < 0) {
 			LOG_ERR("Failed to send watch event, err = %d", rc);
 			goto out;
 		}
 
-		k_free(iter->key);
+		k_free(iter->event_path);
 		sys_dlist_remove(&iter->node);
+		watch_entry_put(iter->watch);
 		k_free(iter);
 
 	}
@@ -1777,7 +1780,6 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	char *path;
 	char *token;
 	struct watch_entry *wentry;
-	struct pending_watch_event_entry *pentry;
 	size_t path_len = 0, full_plen;
 	bool path_is_relative = !xenstore_is_abs_path(payload);
 	int rc;
@@ -1845,26 +1847,11 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	if (key_to_entry_check_perm(path, domain->domid, XS_PERM_READ)) {
-		pentry = k_malloc(sizeof(*pentry));
-		if (!pentry) {
-			goto pentry_fail;
+		if (queue_pending_watch_event(wentry, path,
+					      sys_timepoint_calc(K_FOREVER))) {
+			LOG_WRN("Failed to notify Domain#%d, no memory for event",
+				domain->domid);
 		}
-
-		pentry->key = k_malloc(full_plen);
-		if (!pentry->key) {
-			goto pkey_fail;
-		}
-
-		memcpy(pentry->key, path, full_plen);
-		pentry->domain = domain;
-		sys_dnode_init(&pentry->node);
-
-		k_mutex_lock(&pfl_mutex, K_FOREVER);
-		sys_dlist_append(&pending_watch_event_list, &pentry->node);
-		k_mutex_unlock(&pfl_mutex);
-
-		/* Notify domain thread about new pending event */
-		k_sem_give(&domain->xenstore.xb_sem);
 	}
 	k_mutex_unlock(&xsel_mutex);
 	k_free(path);
@@ -1888,17 +1875,6 @@ wentry_fail:
 
 	return;
 
-pkey_fail:
-	k_free(pentry);
-pentry_fail:
-	k_mutex_unlock(&xsel_mutex);
-	k_free(path);
-	/*
-	 * We can't notify domain that this file already exists,
-	 * so leave it without first WATCH_EVENT
-	 */
-	LOG_WRN("Failed to notify Domain#%d, no memory for event",
-		domain->domid);
 }
 
 static void handle_unwatch(struct xenstore *xenstore, uint32_t id,
@@ -1995,9 +1971,10 @@ static void cleanup_domain_watches(struct xen_domain *domain)
 	k_mutex_lock(&pfl_mutex, K_FOREVER);
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&pending_watch_event_list, pwe_iter,
 					  pwe_next, node) {
-		if (pwe_iter->domain == domain) {
+		if (pwe_iter->watch->domain == domain) {
 			sys_dlist_remove(&pwe_iter->node);
-			k_free(pwe_iter->key);
+			k_free(pwe_iter->event_path);
+			watch_entry_put(pwe_iter->watch);
 			k_free(pwe_iter);
 		}
 	}
