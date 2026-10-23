@@ -227,12 +227,14 @@ static void free_stack_idx(int idx)
  * Should be called with wel_mutex lock and unlock mutex
  * only after all actions with entry will be performed.
  */
-static struct watch_entry *key_to_watcher(const char *key, const char *token)
+static struct watch_entry *key_to_watcher(const char *key, const char *token,
+					  struct xen_domain *domain)
 {
 	struct watch_entry *iter;
 
 	SYS_DLIST_FOR_EACH_CONTAINER (&watch_entry_list, iter, node) {
-		if (strcmp(iter->key, key) == 0 &&
+		if (iter->domain == domain &&
+		    strcmp(iter->key, key) == 0 &&
 		    (token == NULL || strlen(token) == 0 || strcmp(iter->token, token) == 0)) {
 			return iter;
 		}
@@ -1606,7 +1608,7 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 
 	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
-	wentry = key_to_watcher(path, token);
+	wentry = key_to_watcher(path, token, domain);
 
 	if (wentry) {
 		/* Same watch, different path form */
@@ -1720,7 +1722,7 @@ static void handle_unwatch(struct xenstore *xenstore, uint32_t id,
 
 	token = payload + path_len;
 	k_mutex_lock(&wel_mutex, K_FOREVER);
-	entry = key_to_watcher(path, token);
+	entry = key_to_watcher(path, token, domain);
 	k_free(path);
 	if (entry) {
 		if (entry->domain == domain) {
