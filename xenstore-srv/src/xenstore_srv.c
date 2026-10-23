@@ -1219,11 +1219,7 @@ static int initial_watch_notification_queue_xsel_locked(sys_dlist_t *local_event
 {
 	struct initial_watch_notification_context *notification = context;
 	struct watch_entry *entry = notification->entry;
-	bool fire_initial_event;
 	int rc;
-
-	fire_initial_event = key_to_entry_check_perm(path, XENSTORE_LOCAL_DOMAIN_ID,
-						     XS_PERM_READ) != NULL;
 
 	rc = xss_mutex_lock_deadline(&wel_mutex, deadline);
 	if (rc) {
@@ -1238,8 +1234,7 @@ static int initial_watch_notification_queue_xsel_locked(sys_dlist_t *local_event
 	sys_dlist_append(&watch_entry_list, &entry->node);
 	notification->registered = true;
 
-	if (fire_initial_event &&
-	    local_watch_notification_queue(local_events, entry, notification->event_path)) {
+	if (local_watch_notification_queue(local_events, entry, notification->event_path)) {
 		LOG_WRN("Failed to queue initial local watch event for %s",
 			notification->event_path);
 	}
@@ -2013,15 +2008,10 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	}
 	send_reply(xenstore, id, XS_WATCH, "OK");
 
-	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	if (key_to_entry_check_perm(path, domain->domid, XS_PERM_READ)) {
-		if (guest_watch_notification_queue(wentry, path,
-					      sys_timepoint_calc(K_FOREVER))) {
-			LOG_WRN("Failed to notify Domain#%d, no memory for event",
-				domain->domid);
-		}
+	if (guest_watch_notification_queue(wentry, path, sys_timepoint_calc(K_FOREVER))) {
+		LOG_WRN("Failed to notify Domain#%d, no memory for event",
+			domain->domid);
 	}
-	k_mutex_unlock(&xsel_mutex);
 	watch_entry_put(wentry);
 	k_free(path);
 
