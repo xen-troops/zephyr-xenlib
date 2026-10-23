@@ -1810,9 +1810,9 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	entry = key_to_entry(path);
-	k_free(path);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(path);
 		send_errno(xenstore, id, ENOENT);
 		return;
 	}
@@ -1820,6 +1820,7 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	if (xenstore->domain->domid != XENSTORE_LOCAL_DOMAIN_ID &&
 	    !is_owner(entry, xenstore->domain->domid)) {
 		k_mutex_unlock(&xsel_mutex);
+		k_free(path);
 		send_errno(xenstore, id, EACCES);
 		return;
 	}
@@ -1827,10 +1828,13 @@ static void handle_set_perms(struct xenstore *xenstore, uint32_t id,
 	rc = set_perms_by_strings(entry, perm_string, perms_str_size);
 	k_mutex_unlock(&xsel_mutex);
 	if (rc) {
+		k_free(path);
 		send_errno(xenstore, id, -rc);
 		return;
 	}
 
+	notify_watchers(path);
+	k_free(path);
 	send_reply(xenstore, id, XS_SET_PERMS, "OK");
 }
 
@@ -2774,6 +2778,11 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 
 	rc = set_perms_by_array(entry, perms, perms_num);
 	k_mutex_unlock(&xsel_mutex);
+	if (!rc) {
+		rc = notify_watchers_deadline(local_path,
+					      changed_watch_notifications_queue_xsel_locked,
+					      NULL, deadline);
+	}
 	k_free(local_path);
 
 	return rc;
