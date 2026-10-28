@@ -9,17 +9,15 @@
 #include <string.h>
 #include <stdio.h>
 
-#include <zephyr/init.h>
-#include <zephyr/logging/log.h>
-
 #include <mem-mgmt.h>
 #include <domain.h>
 #include <xen/public/io/xs_wire.h>
 #include <xss.h>
 #include <xen-dom-xs.h>
 #include <xenstore_srv.h>
+#include <xenlib_osal.h>
 
-LOG_MODULE_REGISTER(xen_dom_xs);
+XENLIB_OSAL_LOG_MODULE_REGISTER(xen_dom_xs);
 
 /*
  * According to: https://xenbits.xen.org/docs/unstable/man/xen-vbd-interface.7.html
@@ -181,7 +179,8 @@ int xs_add_pvblock_xenstore(const struct pv_block_configuration *cfg, int domid)
 	} else if (!strcmp("ro", cfg->access) || !strcmp("r", cfg->access)) {
 		rc = xss_write_guest_with_permissions(lbuffer, "r", backendid, domid);
 	} else {
-		LOG_ERR("Incorrect format of access field (%s). vdev %s target %s",
+		XENLIB_OSAL_LOG_ERR("Incorrect format of access field (%s). vdev %s "
+			"target %s",
 			cfg->access, cfg->vdev, cfg->target);
 		return -EINVAL;
 	}
@@ -278,7 +277,8 @@ int xs_remove_xenstore_backends(struct xen_domain *domain)
 				domain->back_state.vifs[i].backend_domain_id, domain->domid);
 			rc = xss_rm(lbuffer);
 			if (rc) {
-				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);
+				XENLIB_OSAL_LOG_ERR("Failed to remove node  %s (rc=%d)",
+					lbuffer, rc);
 			}
 			break;
 		}
@@ -294,7 +294,8 @@ int xs_remove_xenstore_backends(struct xen_domain *domain)
 				domain->back_state.disks[i].backend_domain_id, domain->domid);
 			rc = xss_rm(lbuffer);
 			if (rc) {
-				LOG_ERR("Failed to remove node  %s (rc=%d)", lbuffer, rc);
+				XENLIB_OSAL_LOG_ERR("Failed to remove node  %s (rc=%d)",
+					lbuffer, rc);
 			}
 			break;
 		}
@@ -449,7 +450,8 @@ int xs_add_pvnet_xenstore(const struct pv_net_configuration *cfg, int domid, int
 
 	/* TODO: generate MAC if not present */
 	if (cfg->mac[0] == '\0') {
-		LOG_ERR("There isn't valid MAC for network interface! domid %u backendid %u ",
+		XENLIB_OSAL_LOG_ERR("There isn't valid MAC for network interface! domid "
+			"%u backendid %u ",
 			domid, backendid);
 		return -EINVAL;
 	}
@@ -631,6 +633,7 @@ int xs_initialize_xenstore(uint32_t domid, const struct xen_domain *domain)
 
 deinit:
 	xs_deinitialize_domain_xenstore(domid);
-	LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)", domid, rc);
+	XENLIB_OSAL_LOG_ERR("Failed to initialize xenstore for domid#%u (rc=%d)",
+		domid, rc);
 	return rc;
 }

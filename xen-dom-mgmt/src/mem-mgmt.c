@@ -3,16 +3,16 @@
  * Copyright (c) 2023 EPAM Systems
  */
 
-#include <zephyr/xen/memory.h>
+#include <xen/memory.h>
 #if defined(CONFIG_XEN_REGIONS)
-#include <zephyr/xen/regions.h>
+#include <xen/regions.h>
 #endif
-#include <zephyr/logging/log.h>
 
 #include <mem-mgmt.h>
+#include <xenlib_osal.h>
 
 LOG_MODULE_DECLARE(xen_dom_mgmt);
-K_MUTEX_DEFINE(chunks_mutex);
+XENLIB_OSAL_MUTEX_DEFINE(chunks_mutex);
 static uint64_t gfns[CONFIG_PFN_CHUNK_SIZE];
 static uint64_t pfns[CONFIG_PFN_CHUNK_SIZE];
 static int err_codes[CONFIG_PFN_CHUNK_SIZE];
@@ -26,7 +26,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 	uint64_t i = 0;
 	int j, iter;
 
-	k_mutex_lock(&chunks_mutex, K_FOREVER);
+	xenlib_osal_mutex_lock(&chunks_mutex, XENLIB_OSAL_WAIT_FOREVER);
 	while (i < nr_pages) {
 		iter = MIN(nr_pages - i, CONFIG_PFN_CHUNK_SIZE);
 
@@ -40,8 +40,8 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 						 iter, gfns,
 						 pfns, err_codes);
 		if (rc < 0) {
-			k_mutex_unlock(&chunks_mutex);
-			LOG_ERR("Failed to add to physmap batch for domain#%u (rc=%d)",
+			xenlib_osal_mutex_unlock(&chunks_mutex);
+			XENLIB_OSAL_LOG_ERR("Failed to add to physmap batch for domain#%u (rc=%d)",
 				domid, rc);
 			return i;
 		}
@@ -49,7 +49,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 		/* Check error codes for every page frame */
 		for (j = 0; j < iter; j++) {
 			if (err_codes[j]) {
-				k_mutex_unlock(&chunks_mutex);
+				xenlib_osal_mutex_unlock(&chunks_mutex);
 				/*
 				 * Return the last successfully added
 				 * PFN number.
@@ -64,7 +64,7 @@ static uint64_t xendom_add_to_physmap_batch_by_chunks(int domid,
 		base_pfn += iter;
 		base_gfn += iter;
 	}
-	k_mutex_unlock(&chunks_mutex);
+	xenlib_osal_mutex_unlock(&chunks_mutex);
 
 	return i;
 }
@@ -78,7 +78,7 @@ uint64_t xenmem_populate_physmap(int domid,
 	unsigned int populate_iter;
 	int ret;
 
-	k_mutex_lock(&chunks_mutex, K_FOREVER);
+	xenlib_osal_mutex_lock(&chunks_mutex, XENLIB_OSAL_WAIT_FOREVER);
 	while (i < nr_pages) {
 		populate_iter = MIN(nr_pages - i, CONFIG_PFN_CHUNK_SIZE);
 
@@ -90,13 +90,13 @@ uint64_t xenmem_populate_physmap(int domid,
 					      0, pfns);
 		i += ret;
 		if (ret != populate_iter) {
-			k_mutex_unlock(&chunks_mutex);
-			LOG_ERR("Failed to populate physmap (rc=%d)", ret);
+			xenlib_osal_mutex_unlock(&chunks_mutex);
+			XENLIB_OSAL_LOG_ERR("Failed to populate physmap (rc=%d)", ret);
 			return i;
 		}
 		base_pfn += (populate_iter << pfn_shift);
 	}
-	k_mutex_unlock(&chunks_mutex);
+	xenlib_osal_mutex_unlock(&chunks_mutex);
 
 	return i;
 }
@@ -111,7 +111,7 @@ static uint64_t region_space_remove(void *mapped_addr, uint64_t nr_pages)
 	for (i = 0; i < nr_pages; i++) {
 		rc = xendom_remove_from_physmap(DOMID_SELF, base_pfn + i);
 		if (rc < 0) {
-			LOG_ERR("Failed to remove PFN#%llu (0x%llx) from "
+			XENLIB_OSAL_LOG_ERR("Failed to remove PFN#%llu (0x%llx) from "
 				"physmap (rc=%d)",
 				i, base_pfn + i, rc);
 			return i;
@@ -139,9 +139,9 @@ static void *get_region_space(uint64_t nr_pages)
 	uint64_t nr_pfn_removed, populated_pfns, base_pfn;
 	void *mapped_addr;
 
-	mapped_addr = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	mapped_addr = xenlib_osal_memalloc_aligned(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 	if (!mapped_addr) {
-		LOG_ERR("Failed to alloc memory for mapping");
+		XENLIB_OSAL_LOG_ERR("Failed to alloc memory for mapping");
 		return NULL;
 	}
 
@@ -163,13 +163,14 @@ pfn_remove_err:
 	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
 						 PFN_4K_SHIFT, nr_pfn_removed);
 	if (populated_pfns != nr_pfn_removed) {
-		LOG_ERR("Failed to populate physmap while restoring Dom0 physmap (populated only %llu instead of %llu)",
+		XENLIB_OSAL_LOG_ERR("Failed to populate physmap while restoring Dom0 "
+			"physmap (populated only %llu instead of %llu)",
 			populated_pfns, nr_pfn_removed);
 		return NULL;
 	}
 
 err_out:
-	k_free(mapped_addr);
+	xenlib_osal_memfree(mapped_addr);
 	return NULL;
 }
 
@@ -181,13 +182,13 @@ static int put_region_space(void *mapped_addr, uint64_t nr_pages)
 	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
 						 PFN_4K_SHIFT, nr_pages);
 	if (populated_pfns != nr_pages) {
-		LOG_ERR("Failed to populate physmap (populated only %llu "
+		XENLIB_OSAL_LOG_ERR("Failed to populate physmap (populated only %llu "
 			"instead of %llu)",
 			populated_pfns, nr_pages);
 		return -EFAULT;
 	}
 
-	k_free(mapped_addr);
+	xenlib_osal_memfree(mapped_addr);
 	return 0;
 }
 #endif /* CONFIG_XEN_REGIONS */
@@ -204,7 +205,7 @@ int xenmem_map_region(int domid, uint64_t nr_pages, uint64_t base_gfn,
 
 	*mapped_addr = get_region_space(nr_pages);
 	if (!*mapped_addr) {
-		LOG_ERR("Failed to alloc %lld pages for mapping", nr_pages);
+		XENLIB_OSAL_LOG_ERR("Failed to alloc %lld pages for mapping", nr_pages);
 		return -ENOMEM;
 	}
 
@@ -226,12 +227,12 @@ int xenmem_map_region(int domid, uint64_t nr_pages, uint64_t base_gfn,
 
 err_out:
 	if (region_space_remove(mapped_addr, nr_added_pfns) != nr_added_pfns) {
-		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
+		XENLIB_OSAL_LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
 	}
 
 	ret = put_region_space(*mapped_addr, nr_pages);
 	if (ret) {
-		LOG_ERR("Unable to free mapped space: %d", ret);
+		XENLIB_OSAL_LOG_ERR("Unable to free mapped space: %d", ret);
 	}
 
 	return rc;
@@ -244,7 +245,7 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 	nr_removed_pfns = region_space_remove(mapped_addr, nr_pages);
 
 	if (nr_removed_pfns != nr_pages) {
-		LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
+		XENLIB_OSAL_LOG_ERR("Failed to populate space, addr: %p", mapped_addr);
 		return -EFAULT;
 	}
 

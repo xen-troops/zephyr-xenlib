@@ -1,5 +1,5 @@
 name: xenlib
 build:
-  cmake: .
-  kconfig: Kconfig
+  cmake-ext: True
+  kconfig-ext: True
 

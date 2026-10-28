@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/shell/shell.h>
-#include <zephyr/logging/log.h>
-#include <zephyr/xen/dom0/sysctl.h>
+#include <xen/dom0/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -15,8 +13,9 @@
 #ifdef CONFIG_XEN_CONSOLE_SRV
 #include <xen_console.h>
 #endif
+#include <xenlib_osal.h>
 
-LOG_MODULE_REGISTER(xen_shell);
+XENLIB_OSAL_LOG_MODULE_REGISTER(xen_shell);
 static struct xen_domctl_getdomaininfo infos[ALL_DOMAINS_MAX];
 
 static struct xen_domain_cfg domcfg_tmp;
@@ -35,35 +34,35 @@ static int xen_cmd_read_pfdt(struct xen_domain_cfg *domcfg)
 	}
 
 	if (!domcfg->image_dt_get_size && !domcfg->image_dt_read) {
-		LOG_DBG("PDT read callback not provided");
+		XENLIB_OSAL_LOG_DBG("PDT read callback not provided");
 		return 0;
 	}
 
-	LOG_INF("PDT not provided, attempt to read from storage");
+	XENLIB_OSAL_LOG_INF("PDT not provided, attempt to read from storage");
 
 	ret = domcfg->image_dt_get_size(domcfg->image_info, &pfdt_size);
 	if (ret) {
-		LOG_ERR("PDT get size failed (%d)", ret);
+		XENLIB_OSAL_LOG_ERR("PDT get size failed (%d)", ret);
 		return ret;
 	}
 
 	if (!pfdt_size) {
-		LOG_ERR("wrong PDT size");
+		XENLIB_OSAL_LOG_ERR("wrong PDT size");
 		return -ENOEXEC;
 	}
 
 	if (pfdt_size > sizeof(pfdt_read_buf)) {
-		LOG_ERR("PDT size is too big %zd", pfdt_size);
+		XENLIB_OSAL_LOG_ERR("PDT size is too big %zd", pfdt_size);
 		return -EFBIG;
 	}
 
 	ret = domcfg->image_dt_read(pfdt_read_buf, pfdt_size, 0, domcfg->image_info);
 	if (ret) {
-		LOG_ERR("PDT read failed (%d)", ret);
+		XENLIB_OSAL_LOG_ERR("PDT read failed (%d)", ret);
 		return ret;
 	}
 
-	LOG_DBG("PDT read magic:%08x", *(uint32_t *)pfdt_read_buf);
+	XENLIB_OSAL_LOG_DBG("PDT read magic:%08x", *(uint32_t *)pfdt_read_buf);
 
 	domcfg->dtb_start = pfdt_read_buf;
 	domcfg->dtb_end = pfdt_read_buf + pfdt_size;
@@ -122,7 +121,7 @@ static uint32_t parse_domid_or_name(char *arg)
 	return find_domain_by_name(arg);
 }
 
-static int domu_create(const struct shell *shell, int argc, char **argv)
+static int domu_create(const xenlib_osal_shell_t *shell, int argc, char **argv)
 {
 	int ret;
 	uint32_t domid;
@@ -136,13 +135,13 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 
 	name = argv[1];
 	if (!name) {
-		shell_error(shell, "Invalid config passed to create cmd");
+		xenlib_osal_shell_error(shell, "Invalid config passed to create cmd");
 		return -EINVAL;
 	}
 
 	cfg = domain_find_config(name);
 	if (!cfg) {
-		shell_error(shell, "Config %s not found", name);
+		xenlib_osal_shell_error(shell, "Config %s not found", name);
 		return -EINVAL;
 	}
 	/* Made a copy of domain cfg to avoid modification of original cfg by below code */
@@ -168,11 +167,11 @@ static int domu_create(const struct shell *shell, int argc, char **argv)
 		return ret;
 	}
 
-	shell_info(shell, "domain:%u created", domid);
+	xenlib_osal_shell_info(shell, "domain:%u created", domid);
 	return 0;
 }
 
-int domu_destroy(const struct shell *shell, size_t argc, char **argv)
+int domu_destroy(const xenlib_osal_shell_t *shell, size_t argc, char **argv)
 {
 	int ret;
 	uint32_t domid = 0;
@@ -182,7 +181,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 
 	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
-		shell_error(shell, "Invalid domid passed to destroy cmd\n");
+		xenlib_osal_shell_error(shell, "Invalid domid passed to destroy cmd\n");
 		return -EINVAL;
 	}
 
@@ -191,12 +190,13 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 		return ret;
 	}
 
-	shell_info(shell, "domain:%u destroyed", domid);
+	xenlib_osal_shell_info(shell, "domain:%u destroyed", domid);
 	return 0;
 }
 
 #ifdef CONFIG_XEN_CONSOLE_SRV
-int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
+int domu_console_attach(const xenlib_osal_shell_t *shell, size_t argc,
+			   char **argv)
 {
 	uint32_t domid = 0;
 	struct xen_domain *domain;
@@ -206,13 +206,13 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 
 	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
-		shell_error(shell, "Invalid domid passed to create cmd\n");
+		xenlib_osal_shell_error(shell, "Invalid domid passed to create cmd\n");
 		return -EINVAL;
 	}
 
 	domain = get_domain(domid);
 	if (!domain) {
-		shell_error(shell, "domid#%u is not found", domid);
+		xenlib_osal_shell_error(shell, "domid#%u is not found", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
@@ -221,7 +221,7 @@ int domu_console_attach(const struct shell *shell, size_t argc, char **argv)
 }
 #endif
 
-int domu_pause(const struct shell *shell, size_t argc, char **argv)
+int domu_pause(const xenlib_osal_shell_t *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
 	int ret;
@@ -231,7 +231,7 @@ int domu_pause(const struct shell *shell, size_t argc, char **argv)
 
 	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
-		shell_error(shell, "Invalid domid passed to destroy cmd\n");
+		xenlib_osal_shell_error(shell, "Invalid domid passed to destroy cmd\n");
 		return -EINVAL;
 	}
 
@@ -240,11 +240,11 @@ int domu_pause(const struct shell *shell, size_t argc, char **argv)
 		return ret;
 	}
 
-	shell_info(shell, "domain:%u paused", domid);
+	xenlib_osal_shell_info(shell, "domain:%u paused", domid);
 	return 0;
 }
 
-int domu_unpause(const struct shell *shell, size_t argc, char **argv)
+int domu_unpause(const xenlib_osal_shell_t *shell, size_t argc, char **argv)
 {
 	uint32_t domid = 0;
 	int ret;
@@ -254,7 +254,7 @@ int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 
 	domid = parse_domid_or_name(argv[1]);
 	if (!domid) {
-		shell_error(shell, "Invalid domid passed to unpause cmd\n");
+		xenlib_osal_shell_error(shell, "Invalid domid passed to unpause cmd\n");
 		return -EINVAL;
 	}
 
@@ -263,11 +263,11 @@ int domu_unpause(const struct shell *shell, size_t argc, char **argv)
 		return ret;
 	}
 
-	shell_info(shell, "domain:%u unpaused", domid);
+	xenlib_osal_shell_info(shell, "domain:%u unpaused", domid);
 	return 0;
 }
 
-int xen_config_list(const struct shell *shell, size_t argc, char **argv)
+int xen_config_list(const xenlib_osal_shell_t *shell, size_t argc, char **argv)
 {
 	__maybe_unused struct xen_domain_cfg *cfg;
 	int i;
@@ -277,18 +277,19 @@ int xen_config_list(const struct shell *shell, size_t argc, char **argv)
 
 	for (i = 0; i < domain_get_user_cfg_count(); i++) {
 		cfg = domain_get_user_cfg(i);
-		shell_print(shell, "%s", cfg->name);
+		xenlib_osal_shell_print(shell, "%s", cfg->name);
 	}
 
 #ifdef CONFIG_XEN_DOMCFG_SECTION
 	for (cfg = _domain_configs_start; cfg < _domain_configs_end; cfg++) {
-		shell_print(shell, "%s", cfg->name);
+		xenlib_osal_shell_print(shell, "%s", cfg->name);
 	}
 #endif
 
 	return 0;
 }
-static int domain_list(const struct shell *shell, size_t argc, char **argv)
+static int domain_list(const xenlib_osal_shell_t *shell, size_t argc,
+			   char **argv)
 {
 	int i, ret;
 	char domname[CONTAINER_NAME_SIZE];
@@ -301,14 +302,15 @@ static int domain_list(const struct shell *shell, size_t argc, char **argv)
 	if (ret < 0) {
 		goto out;
 	}
-	shell_fprintf(shell, SHELL_NORMAL,
+	xenlib_osal_shell_fprintf(shell, XENLIB_OSAL_SHELL_NORMAL,
 			"Name                                        ID   Mem VCPUs\tState\tTime(s)\n");
 	for (i = 0; i < ret; i++) {
 		if (get_domain_name(infos[i].domain, domname, CONTAINER_NAME_SIZE)) {
 			strncpy(domname, "(NULL)", CONTAINER_NAME_SIZE);
 		}
 		memkb = infos[i].tot_pages * XEN_PAGE_SIZE / 1024;
-		shell_fprintf(shell, SHELL_NORMAL, "%-40s %5d %5lu %5d      %c%c%c%c%c  %8.1f\n",
+		xenlib_osal_shell_fprintf(shell, XENLIB_OSAL_SHELL_NORMAL,
+					  "%-40s %5d %5lu %5d      %c%c%c%c%c  %8.1f\n",
 					  domname,
 					  infos[i].domain,
 					  (unsigned long) (memkb / 1024),
@@ -324,38 +326,39 @@ out:
 	return ret;
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(
+XENLIB_OSAL_SHELL_STATIC_SUBCMD_SET_CREATE(
 	subcmd_xu,
-	SHELL_CMD_ARG(create, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(create, NULL,
 		      " Create Xen domain\n"
 		      " Usage: create cfg_name [-d <domid>] [-p]\n",
 		      domu_create, 2, 3),
-	SHELL_CMD_ARG(destroy, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(destroy, NULL,
 		      " Destroy Xen domain\n"
 		      " Usage: destroy <domid|name>\n",
 		      domu_destroy, 2, 0),
-	SHELL_CMD_ARG(pause, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(pause, NULL,
 		      " Pause Xen domain\n"
 		      " Usage: pause <domid|name>\n",
 		      domu_pause, 2, 0),
-	SHELL_CMD_ARG(unpause, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(unpause, NULL,
 		      " Unpause Xen domain\n"
 		      " Usage: unpause <domid|name>\n",
 		      domu_unpause, 2, 0),
-	SHELL_CMD_ARG(config_list, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(config_list, NULL,
 		      " List available domain configurations\n",
 		      xen_config_list, 1, 0),
 #ifdef CONFIG_XEN_CONSOLE_SRV
-	SHELL_CMD_ARG(console, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(console, NULL,
 		      " Attach to a domain console.\n"
 		      " Press CTRL+] to detach from console\n"
 		      " Usage: console <domid|name>\n",
 		      domu_console_attach, 2, 0),
 #endif
-	SHELL_CMD_ARG(list, NULL,
+	XENLIB_OSAL_SHELL_CMD_ARG(list, NULL,
 		      " List all Xen domains\n"
 			  " Usage: list\n",
 		      domain_list, 1, 0),
-	SHELL_SUBCMD_SET_END);
+	XENLIB_OSAL_SHELL_SUBCMD_SET_END);
 
-SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2, 0);
+XENLIB_OSAL_SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2,
+			   0);

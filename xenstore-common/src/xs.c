@@ -5,15 +5,16 @@
  */
 
 #include <xs.h>
+#include <xenlib_osal.h>
 
-static k_timeout_t default_timeout = K_FOREVER;
+static xenlib_osal_timeout_t default_timeout = XENLIB_OSAL_WAIT_FOREVER;
 
-void xs_set_default_timeout(k_timeout_t tout)
+void xs_set_default_timeout(xenlib_osal_timeout_t tout)
 {
 	default_timeout = tout;
 }
 
-static k_timeout_t xs_default_timeout(void)
+static xenlib_osal_timeout_t xs_default_timeout(void)
 {
 	return default_timeout;
 }

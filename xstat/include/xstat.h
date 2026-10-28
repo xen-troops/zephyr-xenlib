@@ -13,7 +13,7 @@
 #include <xen/public/domctl.h>
 #include <xen/public/sched.h>
 
-#include <zephyr/xen/generic.h>
+#include <xen/generic.h>
 #include <domain.h>
 
 #ifdef __cplusplus

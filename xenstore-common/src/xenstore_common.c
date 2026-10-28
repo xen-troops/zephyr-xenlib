@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include <xenstore_common.h>
+#include <xenlib_osal.h>
 
 int xenstore_perm_to_wire(enum xs_perm perm, char *wire)
 {
@@ -112,7 +113,7 @@ int xenstore_ring_write(struct xenstore_domain_interface *intf, const void *data
 
 	cons = client ? intf->req_cons : intf->rsp_cons;
 	prod = client ? intf->req_prod : intf->rsp_prod;
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 
 	if (xenstore_check_indexes(cons, prod)) {
 		return -EINVAL;
@@ -124,7 +125,7 @@ int xenstore_ring_write(struct xenstore_domain_interface *intf, const void *data
 	}
 
 	memcpy(dest, data, len);
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 	if (client) {
 		intf->req_prod += len;
 	} else {
@@ -142,7 +143,7 @@ int xenstore_ring_read(struct xenstore_domain_interface *intf, void *data, size_
 
 	cons = client ? intf->rsp_cons : intf->req_cons;
 	prod = client ? intf->rsp_prod : intf->req_prod;
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 
 	if (xenstore_check_indexes(cons, prod)) {
 		return -EIO;
@@ -157,7 +158,7 @@ int xenstore_ring_read(struct xenstore_domain_interface *intf, void *data, size_
 		memcpy(data, src, len);
 	}
 
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 	if (client) {
 		intf->rsp_cons += len;
 	} else {

@@ -1,6 +1,6 @@
 # zephyr-xenlib
 
-This is a library for Zephyr OS that provides a set of APIs to interact with Xen hypervisor.
+This is a library that provides a set of APIs to interact with Xen hypervisor.
 
 ![Xen Project Logo](https://downloads.xenproject.org/Branding/Logos/Metallic/xen_project_logo_165x67.png)
 
@@ -15,7 +15,7 @@ the VM:
 #include <domain.h>
 #include <string.h>
 #include <xen_dom_mgmt.h>
-#include <zephyr/xen/public/domctl.h>
+#include <xen/public/domctl.h>
 
 extern char __img_ipl_start[];
 extern char __img_ipl_end[];
@@ -82,6 +82,36 @@ The library provides a set of APIs to interact with Xen hypervisor, most notable
 - `domain.h`: Domain config definitions.
 - `xen_dom_mgmt.h`: APIs to manage domains.
 - `xen-dom-xs.h`: APIs to interact with Xenstore.
+
+## Operating System Abstraction Layer (OSAL)
+
+Xenlib provides a generic Operating System Abstraction Layer (OSAL) interface to
+separate the module from platform-specific operating system APIs.
+
+The OSAL consists of two parts:
+
+- Interface declarations: Defined and maintained by Xenlib. These specify the
+  types, macros, and functions required by the module.
+- Platform-specific implementation: Implemented by the target platform or
+  operating system, providing the functionality declared by the Xenlib OSAL
+  interface.
+
+This separation allows Xenlib to be integrated with different operating systems
+without introducing direct dependencies on their APIs. Each platform is
+responsible for implementing the OSAL interface according to the requirements
+defined by Xenlib.
+The OSAL interface is declared in header files under the osal/ directory,
+organized by subsystem (e.g., logging, assertions, and threads).
+
+Xenlib is provided as a generic set of libraries. The target platform/OS
+is responsible for providing the OS-specific build configuration and
+OS abstraction layer (OSAL) implementation.
+
+The following sections (`Building` and `Configuration`) describe the
+existing Zephyr integration, which provides the necessary build
+configuration and OSAL implementation in the Zephyr repository under
+`zephyr/modules/xenlib` directory. This integration can serve as a reference for
+integrating Xenlib with other platforms.
 
 ## Building
 

@@ -11,9 +11,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include <zephyr/kernel.h>
-
 #include <xenstore_common.h>
+#include <xenlib_osal.h>
 
 /** Convenience constant for requests issued outside a XenStore transaction. */
 #define XS_TRANSACTION_NONE 0U
@@ -31,7 +30,7 @@ extern "C" {
  *
  * @param[in]     tout       Default timeout for blocking waits.
  */
-void xs_set_default_timeout(k_timeout_t tout);
+void xs_set_default_timeout(xenlib_osal_timeout_t tout);
 
 /**
  * @brief Initialize the XenStore API implementation.
@@ -61,7 +60,7 @@ int xs_init(void);
  * @retval -errno on failure.
  */
 ssize_t xs_read_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
-			k_timeout_t tout);
+			xenlib_osal_timeout_t tout);
 
 /**
  * @brief Read the value stored at a XenStore path using the default timeout.
@@ -92,7 +91,8 @@ ssize_t xs_read(const char *path, char *buf, size_t len, uint32_t tx_id);
  * @retval 0 on success.
  * @retval -errno on failure.
  */
-int xs_write_timeout(const char *path, const char *value, uint32_t tx_id, k_timeout_t tout);
+int xs_write_timeout(const char *path, const char *value, uint32_t tx_id,
+			xenlib_osal_timeout_t tout);
 
 /**
  * @brief Write a value to a XenStore path using the default timeout.
@@ -116,7 +116,7 @@ int xs_write(const char *path, const char *value, uint32_t tx_id);
  * @retval 0 on success.
  * @retval -errno on failure.
  */
-int xs_rm_timeout(const char *path, uint32_t tx_id, k_timeout_t tout);
+int xs_rm_timeout(const char *path, uint32_t tx_id, xenlib_osal_timeout_t tout);
 
 /**
  * @brief Remove a XenStore path using the default timeout.
@@ -151,7 +151,7 @@ int xs_rm(const char *path, uint32_t tx_id);
  * @retval -errno on failure.
  */
 ssize_t xs_directory_timeout(const char *path, char *buf, size_t len, uint32_t tx_id,
-			     k_timeout_t tout);
+			     xenlib_osal_timeout_t tout);
 
 /**
  * @brief List child names below a XenStore path using the default timeout.
@@ -194,7 +194,7 @@ ssize_t xs_directory(const char *path, char *buf, size_t len, uint32_t tx_id);
  * @retval -errno on failure.
  */
 ssize_t xs_get_permissions_timeout(const char *path, struct xs_perm_entry *perms,
-				   size_t perms_num, uint32_t tx_id, k_timeout_t tout);
+				   size_t perms_num, uint32_t tx_id, xenlib_osal_timeout_t tout);
 
 /**
  * @brief Read permissions assigned to a XenStore path using the default timeout.
@@ -230,7 +230,7 @@ ssize_t xs_get_permissions(const char *path, struct xs_perm_entry *perms, size_t
  * @retval -errno on failure.
  */
 int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *perms,
-			       size_t perms_num, uint32_t tx_id, k_timeout_t tout);
+			       size_t perms_num, uint32_t tx_id, xenlib_osal_timeout_t tout);
 
 /**
  * @brief Replace permissions assigned to a XenStore path using the default
@@ -257,7 +257,7 @@ int xs_set_permissions(const char *path, const struct xs_perm_entry *perms, size
  * @retval 0 on success.
  * @retval -errno on failure.
  */
-int xs_mkdir_timeout(const char *path, uint32_t tx_id, k_timeout_t tout);
+int xs_mkdir_timeout(const char *path, uint32_t tx_id, xenlib_osal_timeout_t tout);
 
 /**
  * @brief Create a XenStore directory path using the default timeout.
