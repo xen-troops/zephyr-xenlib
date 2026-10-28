@@ -1232,12 +1232,14 @@ static int initial_watch_notification_queue_xsel_locked(sys_dlist_t *local_event
 	}
 
 	sys_dlist_append(&watch_entry_list, &entry->node);
-	notification->registered = true;
-
-	if (local_watch_notification_queue(local_events, entry, notification->event_path)) {
+	rc = local_watch_notification_queue(local_events, entry, notification->event_path);
+	if (rc) {
+		sys_dlist_remove(&entry->node);
 		LOG_WRN("Failed to queue initial local watch event for %s",
 			notification->event_path);
+		goto out;
 	}
+	notification->registered = true;
 
 out:
 	k_mutex_unlock(&wel_mutex);
@@ -1944,6 +1946,8 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 	char *token;
 	struct watch_entry *wentry;
 	size_t path_len = 0, full_plen;
+	bool new_watch = false;
+	bool old_is_relative = false;
 	bool path_is_relative = !xenstore_is_abs_path(payload);
 	int rc;
 	struct xen_domain *domain = xenstore->domain;
@@ -1970,9 +1974,9 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 
 	if (wentry) {
 		/* Same watch, different path form */
+		old_is_relative = wentry->is_relative;
 		wentry->is_relative = path_is_relative;
 		sys_ref_get(&wentry->ref);
-		k_mutex_unlock(&wel_mutex);
 	} else {
 		/* Watch does not exist, create it */
 		k_mutex_unlock(&wel_mutex);
@@ -2004,14 +2008,25 @@ static void handle_watch(struct xenstore *xenstore, uint32_t id, char *payload,
 		k_mutex_lock(&wel_mutex, K_FOREVER);
 		sys_dlist_append(&watch_entry_list, &wentry->node);
 		sys_ref_get(&wentry->ref);
-		k_mutex_unlock(&wel_mutex);
+		new_watch = true;
 	}
-	send_reply(xenstore, id, XS_WATCH, "OK");
 
-	if (guest_watch_notification_queue(wentry, path, sys_timepoint_calc(K_FOREVER))) {
-		LOG_WRN("Failed to notify Domain#%d, no memory for event",
-			domain->domid);
+	rc = guest_watch_notification_queue(wentry, path, sys_timepoint_calc(K_FOREVER));
+	if (rc) {
+		if (new_watch) {
+			remove_watch_entry(wentry);
+		} else {
+			wentry->is_relative = old_is_relative;
+		}
+		k_mutex_unlock(&wel_mutex);
+		watch_entry_put(wentry);
+		k_free(path);
+		send_errno(xenstore, id, -rc);
+		return;
 	}
+	k_mutex_unlock(&wel_mutex);
+
+	send_reply(xenstore, id, XS_WATCH, "OK");
 	watch_entry_put(wentry);
 	k_free(path);
 
