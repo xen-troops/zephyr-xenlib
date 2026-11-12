@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 /**
- * Allocates memory in Dom0 and maps guest memory to this region.
+ * Allocates control-domain memory and maps guest memory to this region.
  * In case of any error, the function will try to restore
  * memory and return error code.
  *
@@ -37,7 +37,7 @@ int xenmem_map_region(int domid, uint64_t nr_pages,
 		      xen_pfn_t base_pfn, void **mapped_addr);
 
 /**
- * Unmaps previously mapped quest memory by xenmem_map_region from Dom0.
+ * Unmaps guest memory previously mapped into the control domain.
  *
  * @param nr_pages - number of pages with XEN_PAGE_SIZE that will be unmapped
  * @param mapped_addr - pointer to memory which will be unmapped

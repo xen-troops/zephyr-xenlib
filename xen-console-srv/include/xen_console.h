@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 /**
- * Start console thread in dom0, that reads domain output.
+ * Start a control-domain console thread that reads domain output.
  *
  * @param domain - domain, where console thread will be started
  *
@@ -22,7 +22,7 @@ extern "C" {
 int xen_start_domain_console(struct xen_domain *domain);
 
 /**
- * Stop console thread in dom0, that reads domain output.
+ * Stop the control-domain console thread that reads domain output.
  *
  * @param domain - domain, where console thread will be stopped
  *

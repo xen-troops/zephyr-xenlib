@@ -107,7 +107,7 @@ static uint64_t region_space_remove(void *mapped_addr, uint64_t nr_pages)
 	int rc;
 
 	base_pfn = xen_virt_to_gfn(mapped_addr);
-	/* Needed to remove mapped DomU pages from Dom0 physmap */
+	/* Needed to remove mapped DomU pages from the control-domain physmap. */
 	for (i = 0; i < nr_pages; i++) {
 		rc = xendom_remove_from_physmap(DOMID_SELF, base_pfn + i);
 		if (rc < 0) {
@@ -163,7 +163,7 @@ pfn_remove_err:
 	populated_pfns = xenmem_populate_physmap(DOMID_SELF, base_pfn,
 						 PFN_4K_SHIFT, nr_pfn_removed);
 	if (populated_pfns != nr_pfn_removed) {
-		LOG_ERR("Failed to populate physmap while restoring Dom0 physmap (populated only %llu instead of %llu)",
+		LOG_ERR("Failed to restore control-domain physmap (%llu of %llu pages)",
 			populated_pfns, nr_pfn_removed);
 		return NULL;
 	}
@@ -253,4 +253,3 @@ int xenmem_unmap_region(uint64_t nr_pages, void *mapped_addr)
 #endif
 	return put_region_space(mapped_addr, nr_pages);
 }
-

@@ -43,7 +43,8 @@ typedef void (*key_value_func_t)(const char*, const char*, void*);
 
 /*
  * pv_block
- * default: backendtype=phy format=raw script=/etc/xen/scripts/block backend=0
+ * default: backendtype=phy format=raw script=/etc/xen/scripts/block
+ *          backend=<control domain ID>
  * supported keys: backend, vdev, access, target, script
  * example: disk= [ 'backend=0, vdev=xvda, access=rw, target=/dev/mmcblk0p3' ]
  */
@@ -70,7 +71,8 @@ static void process_disk_key_value(const char *key, const char *value, void *vcf
 
 /*
  * pv_net
- * default: type=vif script=/etc/xen/scripts/vif-bridge backend=0
+ * default: type=vif script=/etc/xen/scripts/vif-bridge
+ *          backend=<control domain ID>
  * supported keys: backend, mac, bridge, ip, script
  * example:
  * vif=['backend=1,bridge=xenbr0,mac=08:00:27:ff:cb:ce,ip=172.44.0.2 255.255.255.0 172.44.0.1']
@@ -120,7 +122,8 @@ static void *find_entry_and_set_defaults(enum BACKEND_TYPE bt, struct backend_co
 				strncpy(cfg->vifs[i].script, "/etc/xen/scripts/vif-bridge",
 						INIT_XENSTORE_BUFF_SIZE);
 				strncpy(cfg->vifs[i].type, "vif", INIT_XENSTORE_BUFF_SIZE);
-				cfg->vifs[i].backend_domain_id = 0;
+				cfg->vifs[i].backend_domain_id =
+					CONFIG_XEN_CONTROL_DOMAIN_ID;
 				return &cfg->vifs[i];
 			}
 		}
@@ -131,7 +134,8 @@ static void *find_entry_and_set_defaults(enum BACKEND_TYPE bt, struct backend_co
 				strncpy(cfg->disks[i].format, "raw", INIT_XENSTORE_BUFF_SIZE);
 				strncpy(cfg->disks[i].script, "/etc/xen/scripts/block",
 						INIT_XENSTORE_BUFF_SIZE);
-				cfg->disks[i].backend_domain_id = 0;
+				cfg->disks[i].backend_domain_id =
+					CONFIG_XEN_CONTROL_DOMAIN_ID;
 				return &cfg->disks[i];
 			}
 		}

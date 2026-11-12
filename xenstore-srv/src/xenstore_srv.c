@@ -219,8 +219,9 @@ static bool check_perms(struct xs_entry *entry, uint32_t perms, uint32_t caller_
 {
 	struct xs_permissions *iter, *default_perms;
 
-	/* Caller is Dom0 or owner */
-	if (caller_domid == 0 || is_owner(entry, caller_domid)) {
+	/* Caller is the control domain or owner */
+	if (caller_domid == CONFIG_XEN_CONTROL_DOMAIN_ID ||
+	    is_owner(entry, caller_domid)) {
 		return true;
 	}
 
@@ -388,7 +389,7 @@ static void send_reply_sz(struct xenstore *xenstore, uint32_t req_id,
 		/*
 		 * TODO: check if we can act more softly than invalidating the client.
 		 * Now we invalidate the client, to prevent Denial of Service attacks,
-		 * using several domains, that potentially can eat all Dom0 memory.
+		 * using several domains, which could exhaust control-domain memory.
 		 */
 		invalidate_client(xenstore,
 				  "The maximum number of output buffers is exceeded",
@@ -929,7 +930,7 @@ int xss_write(const char *path, const char *value)
 {
 	int rc;
 	struct xs_permissions perms = {
-		.domid = 0,
+		.domid = CONFIG_XEN_CONTROL_DOMAIN_ID,
 		.perms = XS_PERM_NONE,
 	};
 
@@ -938,11 +939,11 @@ int xss_write(const char *path, const char *value)
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, &perms, 1);
+	rc = xss_do_write(path, value, CONFIG_XEN_CONTROL_DOMAIN_ID, &perms, 1);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -961,11 +962,11 @@ int xss_write_guest_domain_rw(const char *path, const char *value, uint32_t domi
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, &perms, 1);
+	rc = xss_do_write(path, value, CONFIG_XEN_CONTROL_DOMAIN_ID, &perms, 1);
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -977,7 +978,7 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	int rc;
 	struct xs_permissions perms[2] = {
 		{
-			.domid = 0,
+			.domid = CONFIG_XEN_CONTROL_DOMAIN_ID,
 			.perms = XS_PERM_NONE,
 		},
 		{
@@ -992,18 +993,20 @@ int xss_write_guest_domain_ro(const char *path, const char *value, uint32_t domi
 	}
 
 	/*
-	 * If the function is invoked for Dom0, there is
+	 * If the function is invoked for the control domain, there is
 	 * no need to set additionally read permission.
 	 */
-	if (domid == 0) {
-		rc = xss_do_write(path, value, 0, perms, 1);
+	if (domid == CONFIG_XEN_CONTROL_DOMAIN_ID) {
+		rc = xss_do_write(path, value, CONFIG_XEN_CONTROL_DOMAIN_ID,
+				  perms, 1);
 	} else {
-		rc = xss_do_write(path, value, 0, perms, 2);
+		rc = xss_do_write(path, value, CONFIG_XEN_CONTROL_DOMAIN_ID,
+				  perms, 2);
 	}
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -1029,12 +1032,12 @@ int xss_write_guest_with_permissions(const char *path, const char *value, uint32
 		return -EINVAL;
 	}
 
-	rc = xss_do_write(path, value, 0, perms, 2);
+	rc = xss_do_write(path, value, CONFIG_XEN_CONTROL_DOMAIN_ID, perms, 2);
 
 	if (rc) {
 		LOG_ERR("Failed to write to xenstore (rc=%d)", rc);
 	} else {
-		notify_watchers(path, 0);
+		notify_watchers(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 	}
 
 	return rc;
@@ -1046,7 +1049,8 @@ int xss_read(const char *path, char *value, size_t len)
 	struct xs_entry *entry;
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_READ);
+	entry = key_to_entry_check_perm(path, CONFIG_XEN_CONTROL_DOMAIN_ID,
+					XS_PERM_READ);
 	if (entry) {
 		if (entry->value) {
 			strncpy(value, entry->value, len);
@@ -1130,7 +1134,8 @@ int xss_set_perm(const char *path, domid_t domid, enum xs_perm perm)
 	};
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
-	entry = key_to_entry_check_perm(path, 0, XS_PERM_NONE);
+	entry = key_to_entry_check_perm(path, CONFIG_XEN_CONTROL_DOMAIN_ID,
+					XS_PERM_NONE);
 	if (!entry) {
 		k_mutex_unlock(&xsel_mutex);
 		return -ENOENT;
@@ -1451,10 +1456,10 @@ static int xss_do_rm(const char *key, uint32_t caller_id)
 
 int xss_rm(const char *path)
 {
-	int ret = xss_do_rm(path, 0);
+	int ret = xss_do_rm(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 
 	if (!ret) {
-		notify_watchers(path, 0);
+		notify_watchers(path, CONFIG_XEN_CONTROL_DOMAIN_ID);
 	}
 
 	return ret;
@@ -2023,7 +2028,7 @@ int stop_domain_stored(struct xen_domain *domain)
 int xs_init_root(void)
 {
 	struct xs_permissions permissions = {
-		.domid = 0,
+		.domid = CONFIG_XEN_CONTROL_DOMAIN_ID,
 		.perms = XS_PERM_NONE,
 	};
 
@@ -2032,4 +2037,3 @@ int xs_init_root(void)
 
 	return set_perms_by_array(&root_xenstore, &permissions, 1);
 }
-

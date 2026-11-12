@@ -3,6 +3,15 @@
 
 if XEN
 
+config XEN_CONTROL_DOMAIN_ID
+	int "Xen control domain ID"
+	default 0
+	range 0 32751
+	help
+	  Domain ID of the privileged domain running the Zephyr control
+	  stack, including the built-in XenStore server when enabled.
+	  Keep the default value for a traditional Dom0 setup.
+
 config XEN_STORE_COMMON
 	bool
 	help
@@ -12,8 +21,7 @@ config XEN_STORE_SRV
 	bool "Enable XenStore server"
 	select XEN_STORE_COMMON
 	help
-	  Enable xenstore server library. It should be included
-	  if you are running Zephyr as Dom0.
+	  Enable the XenStore server library in the control domain.
 
 config XEN_STORE_SRV_SHELL_CMDS
 	depends on SHELL
@@ -74,8 +82,8 @@ config XEN_DOMCFG_READ_PDT
 config XEN_CONSOLE_SRV
 	bool "Enable Xen Console server"
 	help
-	  Enable xen console server. It should be included if you
-	  are running Zephyr as Dom0, otherwise any DomU that uses
+	  Enable Xen console server. It should be included in the
+	  control domain, otherwise any DomU that uses
 	  Xen para-virtual console (PVC) may lock up. On other hand,
 	  this server can be omitted if you are certain that DomUs
 	  will never touch PV console.
@@ -117,7 +125,7 @@ config PFN_CHUNK_SIZE
 	default 128
 	help
 	  Chunk size for helper functions for mapping/unmapping
-	  memory from guest domain to Dom0.
+	  memory from a guest domain to the control domain.
 
 config DOMU_MAX
 	int "Maximum number of DomUs"
