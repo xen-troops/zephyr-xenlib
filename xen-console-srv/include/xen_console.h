@@ -6,7 +6,7 @@
 #ifndef XENLIB_XEN_CONSOLE_H
 #define XENLIB_XEN_CONSOLE_H
 
-#include <zephyr/shell/shell.h>
+#include <xenlib_osal.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,7 +39,7 @@ int xen_stop_domain_console(struct xen_domain *domain);
  *
  * @return - zero on success, negative errno on failure
  */
-int xen_attach_domain_console(const struct shell *shell,
+int xen_attach_domain_console(const xenlib_osal_shell_t *shell,
 			      struct xen_domain *domain);
 
 /**

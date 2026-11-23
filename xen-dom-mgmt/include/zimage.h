@@ -7,8 +7,6 @@
 #ifndef __XENLIB_XEN_ZIMAGE_H__
 #define __XENLIB_XEN_ZIMAGE_H__
 
-#include <zephyr/kernel.h>
-
 #define ZIMAGE64_MAGIC_V0	0x14000008
 /* ASCII ARM\x64 */
 #define ZIMAGE64_MAGIC_V1	0x644d5241

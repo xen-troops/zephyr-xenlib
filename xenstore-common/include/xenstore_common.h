@@ -16,9 +16,7 @@
 #include <sys/types.h>
 #include <xen/public/io/xs_wire.h>
 
-#include <zephyr/sys/barrier.h>
-#include <zephyr/sys/slist.h>
-#include <zephyr/xen/events.h>
+#include <xen/events.h>
 
 /**
  * @brief Xenstore entry access permissions.
