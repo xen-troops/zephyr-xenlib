@@ -9,13 +9,11 @@
 #include <string.h>
 #include <xss.h>
 
-#include <zephyr/sys/util.h>
-
-#include <zephyr/xen/events.h>
-#include <zephyr/xen/gnttab.h>
-#include <zephyr/sys/barrier.h>
+#include <xen/events.h>
+#include <xen/gnttab.h>
 
 #include "vch.h"
+#include <xenlib_osal.h>
 
 #define RD_PROD(h) ((h)->read->prod)
 #define RD_CONS(h) ((h)->read->cons)
@@ -37,16 +35,16 @@
 
 static void _vch_wait(struct vch_handle *h)
 {
-	__ASSERT(h, "Invalid handle");
-	k_sem_take(&h->sem, K_FOREVER);
+	XENLIB_OSAL_ASSERT(h, "Invalid handle");
+	xenlib_osal_semaphore_wait(&h->sem, XENLIB_OSAL_WAIT_FOREVER);
 }
 
 static void _vch_notify_cb(void *data)
 {
 	struct vch_handle *h = data;
 
-	__ASSERT(h, "Invalid handle");
-	k_sem_give(&h->sem);
+	XENLIB_OSAL_ASSERT(h, "Invalid handle");
+	xenlib_osal_semaphore_signal(&h->sem);
 }
 
 static int _vch_notify(struct vch_handle *h, int rw)
@@ -57,7 +55,7 @@ static int _vch_notify(struct vch_handle *h, int rw)
 		return -EINVAL;
 	}
 
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 	if (h->is_server) {
 		target = &h->ring->srv_notify;
 	} else {
@@ -84,7 +82,7 @@ static void _vch_unmask_notify(struct vch_handle *h, int bit)
 {
 	uint8_t *target;
 
-	__ASSERT(h && h->ring, "Invalid handler");
+	XENLIB_OSAL_ASSERT(h && h->ring, "Invalid handler");
 
 	if (h->is_server) {
 		target = &h->ring->cli_notify;
@@ -93,7 +91,7 @@ static void _vch_unmask_notify(struct vch_handle *h, int bit)
 	}
 
 	__atomic_fetch_or(target, bit, __ATOMIC_SEQ_CST);
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 }
 
 static inline size_t _vch_get_rd_avail(struct vch_handle *h, size_t req)
@@ -101,7 +99,7 @@ static inline size_t _vch_get_rd_avail(struct vch_handle *h, size_t req)
 
 	size_t avail = RD_PROD(h) - RD_CONS(h);
 
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 
 	return avail;
 }
@@ -111,7 +109,7 @@ static inline size_t _vch_get_wr_avail(struct vch_handle *h, size_t req)
 
 	size_t avail = WR_RING_SZ(h) - (WR_PROD(h) - WR_CONS(h));
 
-	z_barrier_dmem_fence_full();
+	xenlib_osal_dmem_fence_full();
 
 	return avail;
 }
@@ -148,12 +146,12 @@ int vch_open(domid_t domain, const char *path, size_t min_rs, size_t min_ws,
 		return -EINVAL;
 	}
 
-	rc = k_sem_init(&h->sem, 1, 1);
+	rc = xenlib_osal_semaphore_init(&h->sem, 1, 1);
 	if (rc) {
 		return rc;
 	}
 
-	h->ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
+	h->ring = xenlib_osal_memalloc_aligned(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
 	if (!h->ring) {
 		return -ENOMEM;
 	}
@@ -229,7 +227,7 @@ free_evtch:
 		evtchn_close(h->evtch);
 	}
 	if (h->ring) {
-		k_free(h->ring);
+		xenlib_osal_memfree(h->ring);
 	}
 	memset(h, 0, sizeof(*h));
 	return rc;
@@ -255,7 +253,7 @@ int vch_connect(domid_t domain, const char *path, struct vch_handle *h)
 	memset(h, 0, sizeof(*h));
 	h->is_server = false;
 	strncpy(h->path, path, MIN(sizeof(h->path) - 1, strlen(path)));
-	rc = k_sem_init(&h->sem, 1, 1);
+	rc = xenlib_osal_semaphore_init(&h->sem, 1, 1);
 	if (rc) {
 		return rc;
 	}
@@ -352,12 +350,12 @@ void vch_close(struct vch_handle *h)
 	notify_evtchn(h->evtch);
 	unbind_event_channel(h->evtch);
 	evtchn_close(h->evtch);
-	k_sem_give(&h->sem);
+	xenlib_osal_semaphore_signal(&h->sem);
 
 	if (h->is_server) {
 		xss_rm(h->path);
 		gnttab_end_access(h->gref);
-		k_free(h->ring);
+		xenlib_osal_memfree(h->ring);
 	} else {
 		unmap.host_addr = xen_to_phys(h->ring);
 		unmap.handle = h->grant_handle; 
@@ -385,13 +383,13 @@ int vch_read(struct vch_handle *h, void *buf, size_t size)
 			}
 
 			/* ensure indexes are read before data access */
-			z_barrier_dmem_fence_full();
+			xenlib_osal_dmem_fence_full();
 			size = MIN(size, avail);
 			chunk = MIN(chunk, size);
 			memcpy((uint8_t *)buf, h->read_cbuf + idx, chunk);
 			memcpy((uint8_t *)buf + chunk, h->read_cbuf,
 			       size - chunk);
-			z_barrier_dmem_fence_full();
+			xenlib_osal_dmem_fence_full();
 			RD_CONS(h) += size;
 			if (_vch_notify(h, VCHAN_NOTIFY_READ)) {
 				return -EFAULT;
@@ -430,13 +428,13 @@ int vch_write(struct vch_handle *h, const void *buf, size_t size)
 			}
 
 			/* ensure indexes are read before buffer fill */
-			z_barrier_dmem_fence_full();
+			xenlib_osal_dmem_fence_full();
 			size = MIN(size, avail);
 			chunk = MIN(chunk, size);
 			memcpy(h->write_cbuf + idx, buf, chunk);
 			memcpy(h->write_cbuf, (uint8_t *)buf + chunk,
 			       size - chunk);
-			z_barrier_dmem_fence_full();
+			xenlib_osal_dmem_fence_full();
 			WR_PROD(h) += size;
 			if (_vch_notify(h, VCHAN_NOTIFY_WRITE)) {
 				return -EFAULT;

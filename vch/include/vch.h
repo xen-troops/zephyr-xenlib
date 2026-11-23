@@ -8,12 +8,13 @@
 #ifndef XENLIB_VCH_H
 #define XENLIB_VCH_H
 
-#include <zephyr/xen/generic.h>
+#include <xen/generic.h>
 #include <xen/public/event_channel.h>
 #include <xen/public/grant_table.h>
 #include <xen/public/xen.h>
 
 #include "xen/public/io/libxenvchan.h"
+#include <xenlib_osal.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,7 +25,7 @@ struct vch_handle {
 	grant_ref_t gref;
 	grant_handle_t grant_handle;
 	bool blocking;
-	struct k_sem sem;
+	xenlib_osal_semaphore_t sem;
 	bool is_server;
 	struct vchan_interface *ring;
 	struct ring_shared *write;

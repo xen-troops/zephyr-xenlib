@@ -7,8 +7,6 @@
 #ifndef __XENLIB_XEN_UIMAGE_H__
 #define __XENLIB_XEN_UIMAGE_H__
 
-#include <zephyr/kernel.h>
-
 #define UIMAGE_MAGIC 0x27051956
 #define UIMAGE_NMLEN 32
 

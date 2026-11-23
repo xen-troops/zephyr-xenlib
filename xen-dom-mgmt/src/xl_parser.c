@@ -12,11 +12,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include <zephyr/logging/log.h>
-
 #include <xl_parser.h>
+#include <xenlib_osal.h>
 
-LOG_MODULE_REGISTER(xl_parser);
+XENLIB_OSAL_LOG_MODULE_REGISTER(xl_parser);
 
 enum BACKEND_TYPE {
 	BACKEND_TYPE_UNDEFINED,
@@ -181,7 +180,7 @@ static const char *find_and_parse_next_device(const char *str, enum BACKEND_TYPE
 
 	/* Corrupted string */
 	if (str_len == MAX_PROPERTY_STRING_SIZE && str[str_len] != 0) {
-		LOG_ERR("Corrupted configurations string for xen backends.");
+		XENLIB_OSAL_LOG_ERR("Corrupted configurations string for xen backends.");
 		return NULL;
 	}
 
@@ -189,7 +188,7 @@ static const char *find_and_parse_next_device(const char *str, enum BACKEND_TYPE
 	lq = strchr(str, '\'');
 
 	if (!lq) {
-		LOG_ERR("Unable to find left quote in backends configurations.");
+		XENLIB_OSAL_LOG_ERR("Unable to find left quote in backends configurations.");
 		return NULL;
 	}
 
@@ -197,7 +196,7 @@ static const char *find_and_parse_next_device(const char *str, enum BACKEND_TYPE
 	rq = strchr(lq + 1, '\'');
 
 	if (!rq) {
-		LOG_ERR("Unable to find right quote in backends configurations.");
+		XENLIB_OSAL_LOG_ERR("Unable to find right quote in backends configurations.");
 		return NULL;
 	}
 
@@ -207,7 +206,7 @@ static const char *find_and_parse_next_device(const char *str, enum BACKEND_TYPE
 	kvfunc = process_functions_table[bt];
 
 	if (!device_config || !kvfunc) {
-		LOG_ERR("Invalid backend type in backends configurations.");
+		XENLIB_OSAL_LOG_ERR("Invalid backend type in backends configurations.");
 		return NULL;
 	}
 
