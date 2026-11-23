@@ -68,7 +68,6 @@ jobs:
           west build -p always -b qemu_cortex_a53/qemu_cortex_a53/smp \
             zephyr/samples/hello_world \
             -S xen-dom0 -- \
-            -DZEPHYR_EXTRA_MODULES="${GITHUB_WORKSPACE}/zephyr-xenlib" \
             -DDTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/zephyr-xenlib/.github/ci/qemu_cortex_a53.overlay" \
             -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/zephyr-xenlib/.github/ci/zephyr-xenlib.conf"
 
