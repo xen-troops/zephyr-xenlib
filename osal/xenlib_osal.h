@@ -30,6 +30,7 @@ extern "C" {
 #include <xenlib_osal_assert.h>
 #include <xenlib_osal_atomic.h>
 #include <xenlib_osal_barrier.h>
+#include <xenlib_osal_compiler.h>
 #include <xenlib_osal_list.h>
 #include <xenlib_osal_log.h>
 #include <xenlib_osal_memory.h>
