@@ -41,6 +41,21 @@ void xs_set_default_timeout(xenlib_osal_timeout_t tout);
 int xs_init(void);
 
 /**
+ * @brief Watch notification callback.
+ *
+ * Invoked asynchronously when a XenStore watch fires. Callbacks are serialized
+ * and are not invoked recursively. A callback may call XenStore APIs.
+ *
+ * @param[in]     path       XenStore path that triggered the watch. The pointer
+ *                           is only valid for the duration of the callback.
+ * @param[in]     token      User-supplied token associated with the watch. The
+ *                           pointer is only valid for the callback duration.
+ * @param[in]     param      Opaque user pointer provided when the watch was
+ *                           created.
+ */
+typedef void (*xs_watch_cb)(const char *path, const char *token, void *param);
+
+/**
  * @brief Read the value stored at a XenStore path.
  *
  * When @p buf is not large enough for the full value, the implementation
@@ -269,6 +284,85 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, xenlib_osal_timeout_t tou
  * @retval -errno on failure.
  */
 int xs_mkdir(const char *path, uint32_t tx_id);
+
+/**
+ * @brief Start watching XenStore path changes.
+ *
+ * The token uniquely identifies this client's subscription and must not be
+ * reused by another active watch.
+ *
+ * @param[in]     path       XenStore path to watch.
+ * @param[in]     token      Unique user token returned with matching events.
+ * @param[in]     cb         Callback function invoked for this watch.
+ * @param[in]     param      Opaque user data passed to @p cb.
+ * @param[in]     tout       Maximum time for registration and protocol waits.
+ *                           If the remote result is ambiguous, fatal cleanup
+ *                           may additionally wait for a callback that is
+ *                           already running.
+ *
+ * @retval 0 on success.
+ * @retval -EEXIST @p token already identifies an active watch.
+ * @retval -errno on failure.
+ */
+int xs_watch_timeout(const char *path, const char *token, xs_watch_cb cb, void *param,
+		     xenlib_osal_timeout_t tout);
+
+/**
+ * @brief Start watching XenStore path changes using the default timeout.
+ *
+ * The token uniquely identifies this client's subscription and must not be
+ * reused by another active watch.
+ *
+ * @param[in]     path       XenStore path to watch.
+ * @param[in]     token      Unique user token returned with matching events.
+ * @param[in]     cb         Callback function invoked for this watch.
+ * @param[in]     param      Opaque user data passed to @p cb.
+ *
+ * @retval 0 on success.
+ * @retval -EEXIST @p token already identifies an active watch.
+ * @retval -errno on failure.
+ */
+int xs_watch(const char *path, const char *token, xs_watch_cb cb, void *param);
+
+/**
+ * @brief Stop watching XenStore path changes.
+ *
+ * When called outside this subscription's callback, successful return means
+ * that no callback is pending or running. A callback may unwatch its own
+ * subscription; the current invocation then completes normally.
+ *
+ * @param[in]     path       XenStore path to stop watching.
+ * @param[in]     token      Token passed to xs_watch_timeout().
+ * @param[in]     tout       Maximum time for unregistration and protocol waits.
+ *                           Callback quiescence may extend the call after
+ *                           remote success. If the remote result is ambiguous,
+ *                           fatal cleanup may also wait for already-running
+ *                           callbacks.
+ *
+ * @retval 0 on success.
+ * @retval -ENOENT No active watch matches @p path and @p token.
+ * @retval -EBUSY The matching watch is already being unregistered.
+ * @retval -errno on failure.
+ */
+int xs_unwatch_timeout(const char *path, const char *token,
+		       xenlib_osal_timeout_t tout);
+
+/**
+ * @brief Stop watching XenStore path changes using the default timeout.
+ *
+ * When called outside this subscription's callback, successful return means
+ * that no callback is pending or running. A callback may unwatch its own
+ * subscription; the current invocation then completes normally.
+ *
+ * @param[in]     path       XenStore path to stop watching.
+ * @param[in]     token      Token passed to xs_watch().
+ *
+ * @retval 0 on success.
+ * @retval -ENOENT No active watch matches @p path and @p token.
+ * @retval -EBUSY The matching watch is already being unregistered.
+ * @retval -errno on failure.
+ */
+int xs_unwatch(const char *path, const char *token);
 
 #ifdef __cplusplus
 }

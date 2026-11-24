@@ -35,6 +35,7 @@ extern "C" {
 #include <xenlib_osal_log.h>
 #include <xenlib_osal_memory.h>
 #include <xenlib_osal_mutex.h>
+#include <xenlib_osal_refcount.h>
 #include <xenlib_osal_semaphore.h>
 #include <xenlib_osal_shell.h>
 #include <xenlib_osal_thread.h>

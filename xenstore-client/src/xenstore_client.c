@@ -6,6 +6,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -31,6 +32,10 @@ XENLIB_OSAL_LOG_MODULE_REGISTER(xenstore_client);
 /* Bound active requests and the late responses that remain after local timeout. */
 #define XS_MAX_OUTSTANDING_REQUESTS CONFIG_XEN_STORE_CLIENT_MAX_OUTSTANDING_REQUESTS
 #define XS_EVENT_WORK_MAX_LOOPS  32
+/* Bound heap-backed watch events awaiting callback delivery. */
+#define XS_PENDING_WATCH_EVENTS_MAX CONFIG_XEN_STORE_CLIENT_MAX_PENDING_WATCH_EVENTS
+#define WATCH_OPERATION_ACTIVE_BIT  0U
+#define WATCH_SHUTDOWN_PENDING_BIT  1U
 
 /*
  * Per-call waiter for one synchronous request. Caller threads allocate this on
@@ -55,6 +60,26 @@ struct pending_response {
 	enum xsd_sockmsg_type expected_type;
 	/* Completion status; zero on success, negative errno on failure. */
 	int err;
+};
+
+/* One locally registered callback for a unique XenStore watch token. */
+struct watch_entry {
+	char *path;
+	char *token;
+	xs_watch_cb cb;
+	void *param;
+	xenlib_osal_dnode_t node;
+	xenlib_osal_semaphore_t callback_idle;
+	xenlib_osal_refcount_t ref;
+	bool unregistering;
+	bool callback_running;
+};
+
+/* Callback-thread-owned delivery record copied from one wire watch event. */
+struct watch_event_entry {
+	char *event_path;
+	struct watch_entry *watch;
+	xenlib_osal_dnode_t node;
 };
 
 /*
@@ -94,7 +119,7 @@ struct xenstore_client {
 	 * Shared lifecycle state
 	 */
 
-	/* Protects readiness, failure, worker activity, pending waiters, and tombstones. */
+	/* Protects readiness, response activity, pending waiters, and tombstones. */
 	xenlib_osal_mutex_t lock;
 	/* Published after xs_init() completes. */
 	bool initialized;
@@ -118,7 +143,8 @@ struct xenstore_client {
 	uint32_t timed_out_req_ids[XS_MAX_OUTSTANDING_REQUESTS];
 
 	/*
-	 * Response frame assembly state; worker-owned until teardown quiesces it
+	 * Response frame assembly state; response-thread-owned until teardown
+	 * quiesces it
 	 */
 
 	uint8_t hdr_buf[SZ_SOCKMSG] __attribute__((aligned(4)));
@@ -146,6 +172,40 @@ struct xenstore_client {
 	bool primitives_initialized;
 	/* Prevents the private response thread from being started more than once. */
 	bool response_thread_started;
+
+	/*
+	 * Watch registry and callback queue
+	 */
+
+	/* Protects both lists, the queue count, and mutable callback state. */
+	xenlib_osal_mutex_t watch_mutex;
+	xenlib_osal_dlist_t watches;
+	xenlib_osal_dlist_t pending_watch_events;
+	size_t pending_watch_event_count;
+
+	/*
+	 * WATCH/UNWATCH and deferred-shutdown coordination
+	 */
+
+	/* Serializes watch operations against watch registry shutdown. */
+	xenlib_osal_mutex_t watch_operation_mutex;
+	/* Active operations defer a requested shutdown until they finish. */
+	xenlib_osal_atomic_t watch_operation_state;
+
+	/*
+	 * Watch callback thread lifecycle
+	 */
+
+	/* Wakes the callback thread when events are queued. */
+	xenlib_osal_semaphore_t watch_sem;
+	xenlib_osal_thread_t watch_thread;
+	xenlib_osal_tid_t watch_tid;
+	bool watch_mutex_initialized;
+	bool watch_operation_mutex_initialized;
+	bool watch_sem_initialized;
+	bool watch_primitives_initialized;
+	/* Prevents the callback thread from being started more than once. */
+	bool watch_thread_started;
 };
 
 static struct xenstore_client xs_cli;
@@ -155,6 +215,8 @@ static struct xenstore_client xs_cli;
  */
 static XENLIB_OSAL_THREAD_STACK_DEFINE(xs_response_stack,
 				       CONFIG_XEN_STORE_CLIENT_WORKQ_STACK_SIZE);
+static XENLIB_OSAL_THREAD_STACK_DEFINE(xs_watch_stack,
+				       CONFIG_XEN_STORE_CLIENT_WATCH_STACK_SIZE);
 static XENLIB_OSAL_MUTEX_DEFINE(xs_init_lock);
 
 static inline size_t min_size(size_t lhs, size_t rhs)
@@ -206,6 +268,45 @@ static int initialize_sync_primitives(struct xenstore_client *xs)
 	xs->primitives_initialized = true;
 	return 0;
 }
+
+static int initialize_watch_primitives(struct xenstore_client *xs)
+{
+	int err;
+
+	if (!xs->watch_mutex_initialized) {
+		err = xenlib_osal_mutex_init(&xs->watch_mutex);
+		if (err != 0) {
+			return osal_error(err);
+		}
+		xs->watch_mutex_initialized = true;
+	}
+
+	if (!xs->watch_operation_mutex_initialized) {
+		err = xenlib_osal_mutex_init(&xs->watch_operation_mutex);
+		if (err != 0) {
+			return osal_error(err);
+		}
+		xs->watch_operation_mutex_initialized = true;
+	}
+
+	if (!xs->watch_sem_initialized) {
+		err = xenlib_osal_semaphore_init(&xs->watch_sem, 0, INT_MAX);
+		if (err != 0) {
+			return osal_error(err);
+		}
+		xs->watch_sem_initialized = true;
+	}
+
+	xenlib_osal_dlist_init(&xs->watches);
+	xenlib_osal_dlist_init(&xs->pending_watch_events);
+	xs->pending_watch_event_count = 0;
+	(void)xenlib_osal_atomic_clear(&xs->watch_operation_state);
+	xs->watch_primitives_initialized = true;
+
+	return 0;
+}
+
+static void shutdown_watches(struct xenstore_client *xs);
 
 /* Clear partial frame-assembly and discard state. */
 static void frame_reset(struct xenstore_client *xs)
@@ -553,7 +654,7 @@ static void teardown_transport(struct xenstore_client *xs, bool wait_for_worker)
 	(void)xenlib_osal_mutex_unlock(&xs->req_mutex);
 }
 
-/* Permanently fail the transport; worker context must not wait for itself. */
+/* Fail transport and watches; the response turn must not wait for itself. */
 static void fail_transport(struct xenstore_client *xs, int err, bool response_worker_context)
 {
 	int mutex_err = xenlib_osal_mutex_lock(&xs_init_lock, XENLIB_OSAL_WAIT_FOREVER);
@@ -570,6 +671,14 @@ static void fail_transport(struct xenstore_client *xs, int err, bool response_wo
 	/* The failed flag now prevents xs_init(); do not hold init_lock while quiescing work. */
 	teardown_transport(xs, !response_worker_context);
 	fail_all_pending(xs, err);
+	xenlib_osal_atomic_set_bit(&xs->watch_operation_state,
+				   WATCH_SHUTDOWN_PENDING_BIT);
+	if (!(xenlib_osal_atomic_get(&xs->watch_operation_state) &
+	      (1U << WATCH_OPERATION_ACTIVE_BIT)) &&
+	    xenlib_osal_atomic_test_and_clear_bit(&xs->watch_operation_state,
+						 WATCH_SHUTDOWN_PENDING_BIT)) {
+		shutdown_watches(xs);
+	}
 }
 
 /*
@@ -595,7 +704,7 @@ static void prepare_frame_buffer(struct xenstore_client *xs, size_t capacity, ui
 static void discard_frame_tail(struct xenstore_client *xs, size_t payload_tail_len)
 {
 	xs->hdr_pos = 0;
-	/* Remember the unread tail so the worker drains it before parsing again. */
+	/* Remember the unread tail so the response thread drains it before parsing again. */
 	xs->to_discard = payload_tail_len;
 	xs->frame.pos = 0;
 	xs->frame.len = 0;
@@ -652,7 +761,7 @@ static int response_ring_read(struct xenstore_client *xenstore, void *data, size
 }
 
 /*
- * Response frame parsing and waiter completion
+ * Response frame parsing and dispatch
  */
 
 static int read_frame_header(struct xenstore_client *xs, size_t *avail)
@@ -701,6 +810,13 @@ static int select_frame_buffer(struct xenstore_client *xs)
 	struct xsd_sockmsg *hdr = (struct xsd_sockmsg *)(xs->hdr_buf);
 	struct pending_response *pending;
 
+	if (hdr->type == XS_WATCH_EVENT) {
+		if (xs->frame.pos == 0) {
+			prepare_frame_buffer(xs, hdr->len, hdr->req_id, XS_WATCH_EVENT);
+		}
+		return 0;
+	}
+
 	(void)xenlib_osal_mutex_lock(&xs->lock, XENLIB_OSAL_WAIT_FOREVER);
 	pending = find_pending(xs, hdr->req_id);
 	if (!pending) {
@@ -732,8 +848,15 @@ static int validate_frame_payload(struct xenstore_client *xs, const struct xsd_s
 {
 	*fatal = false;
 
-	if (hdr->req_id == 0) {
+	if ((hdr->type != XS_WATCH_EVENT) && (hdr->req_id == 0)) {
 		XENLIB_OSAL_LOG_ERR("Invalid response header: req_id must be non-zero");
+		*fatal = true;
+		return -EPROTO;
+	}
+
+	if ((hdr->type == XS_WATCH_EVENT) && (hdr->req_id != 0)) {
+		XENLIB_OSAL_LOG_ERR("Invalid watch header: req_id=%u (expected 0)",
+				     hdr->req_id);
 		*fatal = true;
 		return -EPROTO;
 	}
@@ -816,7 +939,9 @@ static int fail_frame_payload(struct xenstore_client *xs, const struct xsd_sockm
 		return err;
 	}
 
-	complete_pending_with_error(xs, hdr->req_id, err);
+	if (hdr->type != XS_WATCH_EVENT) {
+		complete_pending_with_error(xs, hdr->req_id, err);
+	}
 
 	discard_frame_tail(xs, hdr->len - min_size(xs->frame.pos, hdr->len));
 
@@ -853,9 +978,234 @@ static int read_frame_payload(struct xenstore_client *xs, size_t avail)
 }
 
 /*
+ * Watch registration and callback delivery
+ */
+
+static void destroy_watch_entry(struct watch_entry *watch)
+{
+	xenlib_osal_memfree(watch->path);
+	xenlib_osal_memfree(watch->token);
+	xenlib_osal_memfree(watch);
+}
+
+static void watch_entry_put(struct watch_entry *watch)
+{
+	if (xenlib_osal_refcount_put(&watch->ref)) {
+		destroy_watch_entry(watch);
+	}
+}
+
+/* Queue a completed watch frame while retaining its matched registration. */
+static int queue_watch_event_from_frame(struct xenstore_client *xs)
+{
+	struct watch_event_entry *event;
+	struct watch_entry *watch = NULL;
+	struct watch_entry *iter;
+	const char *payload = xs->frame.buf;
+	const char *token;
+	size_t path_len;
+	size_t token_len;
+
+	path_len = strnlen(payload, xs->frame.pos);
+	if (path_len == xs->frame.pos) {
+		XENLIB_OSAL_LOG_WRN("Discarding malformed watch event: path is not NUL-terminated");
+		frame_reset(xs);
+		return 0;
+	}
+
+	token = payload + path_len + 1;
+	token_len = strnlen(token, xs->frame.pos - path_len - 1);
+	if (token_len == 0 || token_len + path_len + 2 != xs->frame.pos) {
+		XENLIB_OSAL_LOG_WRN("Discarding malformed watch event token");
+		frame_reset(xs);
+		return 0;
+	}
+
+	event = xenlib_osal_memalloc(sizeof(*event));
+	if (!event) {
+		XENLIB_OSAL_LOG_ERR("Failed to allocate watch event");
+		frame_reset(xs);
+		return -ENOMEM;
+	}
+
+	event->event_path = xenlib_osal_memalloc(path_len + 1);
+	if (!event->event_path) {
+		xenlib_osal_memfree(event);
+		XENLIB_OSAL_LOG_ERR("Failed to allocate watch event path");
+		frame_reset(xs);
+		return -ENOMEM;
+	}
+	memcpy(event->event_path, payload, path_len + 1);
+	xenlib_osal_dnode_init(&event->node);
+
+	(void)xenlib_osal_mutex_lock(&xs->watch_mutex, XENLIB_OSAL_WAIT_FOREVER);
+	XENLIB_OSAL_DLIST_FOR_EACH_CONTAINER(&xs->watches, iter, node) {
+		if (strcmp(iter->token, token) == 0) {
+			watch = iter;
+			break;
+		}
+	}
+	if (!watch) {
+		(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+		xenlib_osal_memfree(event->event_path);
+		xenlib_osal_memfree(event);
+		frame_reset(xs);
+		return 0;
+	}
+	if (xs->pending_watch_event_count >= XS_PENDING_WATCH_EVENTS_MAX) {
+		(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+		xenlib_osal_memfree(event->event_path);
+		xenlib_osal_memfree(event);
+		XENLIB_OSAL_LOG_ERR("Watch event queue is full");
+		frame_reset(xs);
+		return -ENOSPC;
+	}
+
+	event->watch = watch;
+	xenlib_osal_refcount_get(&watch->ref);
+	xenlib_osal_dlist_append(&xs->pending_watch_events, &event->node);
+	xs->pending_watch_event_count++;
+	(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+	(void)xenlib_osal_semaphore_signal(&xs->watch_sem);
+
+	frame_reset(xs);
+	return 0;
+}
+
+/* Caller holds watch_mutex. */
+static void discard_queued_watch_events(struct xenstore_client *xs, struct watch_entry *watch)
+{
+	struct watch_event_entry *event;
+	struct watch_event_entry *next;
+
+	XENLIB_OSAL_DLIST_FOR_EACH_CONTAINER_SAFE(&xs->pending_watch_events, event,
+						 next, node) {
+		if (event->watch == watch) {
+			xenlib_osal_dlist_remove(&event->node);
+			xs->pending_watch_event_count--;
+			xenlib_osal_memfree(event->event_path);
+			watch_entry_put(event->watch);
+			xenlib_osal_memfree(event);
+		}
+	}
+}
+
+/*
+ * Caller owns a watch reference. Return true when a foreign active callback
+ * must be awaited after detaching the registration.
+ */
+static bool detach_local_watch(struct xenstore_client *xs, struct watch_entry *watch)
+{
+	bool wait_for_callback = false;
+
+	(void)xenlib_osal_mutex_lock(&xs->watch_mutex, XENLIB_OSAL_WAIT_FOREVER);
+	xenlib_osal_dlist_remove(&watch->node);
+	discard_queued_watch_events(xs, watch);
+	if (watch->callback_running && xenlib_osal_thread_current() != xs->watch_tid) {
+		wait_for_callback = true;
+	}
+	(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+	watch_entry_put(watch);
+
+	return wait_for_callback;
+}
+
+/* Detach all registrations, discard queued events, and wait for foreign callbacks. */
+static void shutdown_watches(struct xenstore_client *xs)
+{
+	struct watch_entry *watch;
+
+	if (!xs->watch_thread_started) {
+		return;
+	}
+
+	(void)xenlib_osal_mutex_lock(&xs->watch_operation_mutex,
+					 XENLIB_OSAL_WAIT_FOREVER);
+	for (;;) {
+		bool wait_for_callback;
+
+		(void)xenlib_osal_mutex_lock(&xs->watch_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		if (xenlib_osal_dlist_is_empty(&xs->watches)) {
+			(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+			break;
+		}
+
+		watch = XENLIB_OSAL_DLIST_PEEK_HEAD_CONTAINER(&xs->watches, watch, node);
+		xenlib_osal_refcount_get(&watch->ref);
+		watch->unregistering = true;
+		(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+		wait_for_callback = detach_local_watch(xs, watch);
+		(void)xenlib_osal_mutex_unlock(&xs->watch_operation_mutex);
+
+		if (wait_for_callback) {
+			(void)xenlib_osal_semaphore_wait(&watch->callback_idle,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		}
+		watch_entry_put(watch);
+
+		(void)xenlib_osal_mutex_lock(&xs->watch_operation_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+	}
+	(void)xenlib_osal_mutex_unlock(&xs->watch_operation_mutex);
+}
+
+static void watch_callback_thread(void *p1, void *p2, void *p3)
+{
+	struct xenstore_client *xs = p1;
+
+	(void)p2;
+	(void)p3;
+
+	for (;;) {
+		struct watch_event_entry *event;
+		struct watch_entry *watch;
+
+		int err = xenlib_osal_semaphore_wait(&xs->watch_sem,
+						      XENLIB_OSAL_WAIT_FOREVER);
+
+		if (err != 0) {
+			XENLIB_OSAL_LOG_ERR("Failed to wait for a watch event: %d", err);
+			fail_transport(xs, osal_error(err), false);
+			return;
+		}
+
+		(void)xenlib_osal_mutex_lock(&xs->watch_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		if (xenlib_osal_dlist_is_empty(&xs->pending_watch_events)) {
+			(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+			continue;
+		}
+
+		event = XENLIB_OSAL_DLIST_PEEK_HEAD_CONTAINER(
+			&xs->pending_watch_events, event, node);
+		xenlib_osal_dlist_remove(&event->node);
+		xs->pending_watch_event_count--;
+		watch = event->watch;
+		XENLIB_OSAL_ASSERT_NO_MSG(
+			xenlib_osal_semaphore_wait(&watch->callback_idle,
+						   XENLIB_OSAL_NO_WAIT) == 0);
+		watch->callback_running = true;
+		(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+
+		watch->cb(event->event_path, watch->token, watch->param);
+		xenlib_osal_memfree(event->event_path);
+		xenlib_osal_memfree(event);
+
+		(void)xenlib_osal_mutex_lock(&xs->watch_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		watch->callback_running = false;
+		(void)xenlib_osal_semaphore_signal(&watch->callback_idle);
+		(void)xenlib_osal_mutex_unlock(&xs->watch_mutex);
+		watch_entry_put(watch);
+	}
+}
+
+/*
  * Response completion and work scheduling
  */
 
+/* Worker-only; unlink a matching stack waiter before waking its caller. */
 static void complete_pending_from_frame(struct xenstore_client *xs)
 {
 	struct xsd_sockmsg *hdr = (struct xsd_sockmsg *)(xs->hdr_buf);
@@ -935,12 +1285,14 @@ static void submit_response_work(struct xenstore_client *xs)
 }
 
 /*
- * Worker-only: consume at most one frame and complete its waiter. Return
- * -EAGAIN for partial input, -ENOMSG for an unmatched response, or another
- * negative error after any required waiter, discard, or transport update.
+ * Worker-only: consume at most one frame and dispatch it to a waiter or watch
+ * queue. Return -EAGAIN for partial input, -ENOMSG for an unmatched response,
+ * or another negative error after any required waiter, discard, or transport
+ * update.
  */
 static int process_one_response_frame(struct xenstore_client *xs, size_t avail)
 {
+	struct xsd_sockmsg *hdr = (struct xsd_sockmsg *)(xs->hdr_buf);
 	int ret;
 
 	ret = read_frame_header(xs, &avail);
@@ -958,7 +1310,15 @@ static int process_one_response_frame(struct xenstore_client *xs, size_t avail)
 		return ret;
 	}
 
-	complete_pending_from_frame(xs);
+	if (hdr->type == XS_WATCH_EVENT) {
+		ret = queue_watch_event_from_frame(xs);
+		if (ret < 0) {
+			fail_transport(xs, ret, true);
+			return ret;
+		}
+	} else {
+		complete_pending_from_frame(xs);
+	}
 
 	return 0;
 }
@@ -1041,7 +1401,7 @@ static void response_worker(void *p1, void *p2, void *p3)
 	}
 }
 
-/* Defer response processing from event-channel IRQ context to the worker. */
+/* Defer response processing from event-channel IRQ context to the response thread. */
 static void response_event_channel_callback(void *data)
 {
 	struct xenstore_client *xs = data;
@@ -1308,12 +1668,13 @@ end:
 
 /*
  * Execute one synchronous request. NULL param_lens serializes NUL-terminated
- * strings; otherwise lengths are explicit.
+ * strings; otherwise lengths are explicit. Set ambiguous_timeout only when a
+ * fully submitted request times out before its result is known.
  */
 static ssize_t execute_request(struct xenstore_client *xs, enum xsd_sockmsg_type type,
 			       const char *const *params, const size_t *param_lens,
 			       size_t params_num, char *buf, size_t len, uint32_t tx_id,
-			       xenlib_osal_timeout_t timeout)
+			       xenlib_osal_timeout_t timeout, bool *ambiguous_timeout)
 {
 	/*
 	 * Stack-allocated waiter: appended to pending_responses, then woken
@@ -1331,6 +1692,10 @@ static ssize_t execute_request(struct xenstore_client *xs, enum xsd_sockmsg_type
 	xenlib_osal_timepoint_t deadline;
 	ssize_t result = 0;
 	int err;
+
+	if (ambiguous_timeout) {
+		*ambiguous_timeout = false;
+	}
 
 	if (!is_ready(xs)) {
 		XENLIB_OSAL_LOG_ERR("XenStore client not initialized");
@@ -1367,6 +1732,9 @@ static ssize_t execute_request(struct xenstore_client *xs, enum xsd_sockmsg_type
 				     resp_local.req_id);
 		timeout_pending(xs, &resp_local);
 		submit_response_work(xs);
+		if (ambiguous_timeout) {
+			*ambiguous_timeout = true;
+		}
 		return -ETIMEDOUT;
 	}
 
@@ -1430,6 +1798,23 @@ int xs_init(void)
 		(void)xenlib_osal_thread_name_set(xs_cli.response_tid,
 						   "xenstore-response");
 		xs_cli.response_thread_started = true;
+	}
+
+	if (!xs_cli.watch_thread_started) {
+		if (!xs_cli.watch_primitives_initialized) {
+			err = initialize_watch_primitives(&xs_cli);
+			if (err != 0) {
+				XENLIB_OSAL_LOG_ERR("Failed to initialize watch state: %d", err);
+				goto out;
+			}
+		}
+		xs_cli.watch_tid = xenlib_osal_thread_create(
+			&xs_cli.watch_thread, xs_watch_stack,
+			CONFIG_XEN_STORE_CLIENT_WATCH_STACK_SIZE, watch_callback_thread,
+			&xs_cli, NULL, NULL, xs_cli.response_thread_priority, 0,
+			XENLIB_OSAL_NO_WAIT);
+		(void)xenlib_osal_thread_name_set(xs_cli.watch_tid, "xenstore-watch");
+		xs_cli.watch_thread_started = true;
 	}
 
 	xenlib_osal_slist_init(&xs_cli.pending_responses);
@@ -1524,7 +1909,8 @@ static ssize_t execute_path(enum xsd_sockmsg_type type, const char *path, char *
 	}
 
 	return execute_request(&xs_cli, type, params, NULL,
-			       sizeof(params) / sizeof(params[0]), buf, len, tx_id, tout);
+			       sizeof(params) / sizeof(params[0]), buf, len, tx_id, tout,
+			       NULL);
 }
 
 /* Execute a path-only request whose successful reply payload is not exposed. */
@@ -1541,6 +1927,62 @@ static int execute_path_command(enum xsd_sockmsg_type type, const char *path, ui
 	ret = execute_path(type, path, response, sizeof(response), tx_id, tout);
 
 	return (ret < 0) ? (int)ret : 0;
+}
+
+/* Execute a watch command whose payload is path\0token\0. */
+static int execute_watch_command(enum xsd_sockmsg_type type, const char *path, const char *token,
+				 xenlib_osal_timeout_t tout, bool *ambiguous_timeout)
+{
+	const char *const params[] = {path, token};
+	char response[XS_ERROR_WIRE_MAX];
+	ssize_t ret;
+
+	ret = execute_request(&xs_cli, type, params, NULL,
+			      sizeof(params) / sizeof(params[0]), response,
+			      sizeof(response), XS_TRANSACTION_NONE, tout,
+			      ambiguous_timeout);
+
+	return (ret < 0) ? (int)ret : 0;
+}
+
+static char *copy_watch_string(const char *str)
+{
+	size_t len = strlen(str) + 1;
+	char *copy = xenlib_osal_memalloc(len);
+
+	if (copy) {
+		memcpy(copy, str, len);
+	}
+
+	return copy;
+}
+
+/* Acquire serialized watch operation state before the deadline. */
+static int begin_watch_operation(struct xenstore_client *xs,
+				 xenlib_osal_timepoint_t deadline)
+{
+	if (xenlib_osal_mutex_lock(&xs->watch_operation_mutex,
+				   xenlib_osal_timepoint_timeout(deadline)) != 0) {
+		return -ETIMEDOUT;
+	}
+
+	xenlib_osal_atomic_set_bit(&xs->watch_operation_state,
+				   WATCH_OPERATION_ACTIVE_BIT);
+
+	return 0;
+}
+
+/* End the operation, then perform any fatal shutdown deferred by it. */
+static void end_watch_operation(struct xenstore_client *xs)
+{
+	xenlib_osal_atomic_clear_bit(&xs->watch_operation_state,
+				     WATCH_OPERATION_ACTIVE_BIT);
+	(void)xenlib_osal_mutex_unlock(&xs->watch_operation_mutex);
+
+	if (xenlib_osal_atomic_test_and_clear_bit(&xs->watch_operation_state,
+						 WATCH_SHUTDOWN_PENDING_BIT)) {
+		shutdown_watches(xs);
+	}
 }
 
 /*
@@ -1717,7 +2159,7 @@ int xs_set_permissions_timeout(const char *path, const struct xs_perm_entry *per
 
 	ret = execute_request(&xs_cli, XS_SET_PERMS, params, param_lens,
 			      sizeof(params) / sizeof(params[0]), response,
-			      sizeof(response), tx_id, tout);
+			      sizeof(response), tx_id, tout, NULL);
 	if (ret >= 0) {
 		ret = 0;
 	}
@@ -1746,7 +2188,7 @@ int xs_write_timeout(const char *path, const char *value, uint32_t tx_id,
 
 	ret = execute_request(&xs_cli, XS_WRITE, params, param_lens,
 			      sizeof(params) / sizeof(params[0]), response,
-			      sizeof(response), tx_id, tout);
+			      sizeof(response), tx_id, tout, NULL);
 
 	return (ret < 0) ? (int)ret : 0;
 }
@@ -1759,4 +2201,185 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id, xenlib_osal_timeout_t tou
 int xs_rm_timeout(const char *path, uint32_t tx_id, xenlib_osal_timeout_t tout)
 {
 	return execute_path_command(XS_RM, path, tx_id, tout);
+}
+
+int xs_watch_timeout(const char *path, const char *token, xs_watch_cb cb, void *param,
+		     xenlib_osal_timeout_t tout)
+{
+	struct watch_entry *watch;
+	struct watch_entry *iter;
+	bool ambiguous_timeout;
+	bool wait_for_callback = false;
+	xenlib_osal_timepoint_t deadline;
+	int ret;
+
+	if (!path || !token || token[0] == '\0' || !cb) {
+		return -EINVAL;
+	}
+
+	if (!is_ready(&xs_cli)) {
+		return -ENODEV;
+	}
+
+	watch = xenlib_osal_memalloc(sizeof(*watch));
+	if (!watch) {
+		return -ENOMEM;
+	}
+	memset(watch, 0, sizeof(*watch));
+	ret = xenlib_osal_semaphore_init(&watch->callback_idle, 1, 1);
+	if (ret != 0) {
+		xenlib_osal_memfree(watch);
+		return osal_error(ret);
+	}
+	xenlib_osal_refcount_init(&watch->ref);
+	xenlib_osal_dnode_init(&watch->node);
+
+	watch->path = copy_watch_string(path);
+	watch->token = copy_watch_string(token);
+	watch->cb = cb;
+	watch->param = param;
+	if (!watch->path || !watch->token) {
+		destroy_watch_entry(watch);
+		return -ENOMEM;
+	}
+
+	deadline = xenlib_osal_timepoint_calc(tout);
+	ret = begin_watch_operation(&xs_cli, deadline);
+	if (ret < 0) {
+		destroy_watch_entry(watch);
+		return ret;
+	}
+	if (!is_ready(&xs_cli)) {
+		end_watch_operation(&xs_cli);
+		destroy_watch_entry(watch);
+		return -ENODEV;
+	}
+
+	(void)xenlib_osal_mutex_lock(&xs_cli.watch_mutex, XENLIB_OSAL_WAIT_FOREVER);
+	/*
+	 * A watch event returns the changed path, not the registered path. Require a
+	 * unique token so the event always selects one local callback.
+	 */
+	XENLIB_OSAL_DLIST_FOR_EACH_CONTAINER(&xs_cli.watches, iter, node) {
+		if (strcmp(iter->token, token) == 0) {
+			(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+			end_watch_operation(&xs_cli);
+			destroy_watch_entry(watch);
+			return -EEXIST;
+		}
+	}
+	xenlib_osal_dlist_append(&xs_cli.watches, &watch->node);
+	(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+
+	ret = execute_watch_command(XS_WATCH, path, token,
+				    xenlib_osal_timepoint_timeout(deadline),
+				    &ambiguous_timeout);
+	if (ret < 0) {
+		(void)xenlib_osal_mutex_lock(&xs_cli.watch_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		watch->unregistering = true;
+		if (!ambiguous_timeout) {
+			xenlib_osal_refcount_get(&watch->ref);
+		}
+		(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+
+		if (!ambiguous_timeout) {
+			wait_for_callback = detach_local_watch(&xs_cli, watch);
+		}
+	}
+	end_watch_operation(&xs_cli);
+
+	if (ambiguous_timeout) {
+		fail_transport(&xs_cli, -ETIMEDOUT, false);
+	} else if (ret < 0) {
+		if (wait_for_callback) {
+			(void)xenlib_osal_semaphore_wait(&watch->callback_idle,
+						 XENLIB_OSAL_WAIT_FOREVER);
+		}
+		watch_entry_put(watch);
+	}
+
+	return ret;
+}
+
+int xs_unwatch_timeout(const char *path, const char *token,
+		       xenlib_osal_timeout_t tout)
+{
+	struct watch_entry *watch = NULL;
+	struct watch_entry *iter;
+	bool ambiguous_timeout;
+	bool wait_for_callback;
+	xenlib_osal_timepoint_t deadline;
+	int ret;
+
+	if (!path || !token || token[0] == '\0') {
+		return -EINVAL;
+	}
+
+	if (!is_ready(&xs_cli)) {
+		return -ENODEV;
+	}
+
+	deadline = xenlib_osal_timepoint_calc(tout);
+	ret = begin_watch_operation(&xs_cli, deadline);
+	if (ret < 0) {
+		return ret;
+	}
+	if (!is_ready(&xs_cli)) {
+		end_watch_operation(&xs_cli);
+		return -ENODEV;
+	}
+
+	(void)xenlib_osal_mutex_lock(&xs_cli.watch_mutex, XENLIB_OSAL_WAIT_FOREVER);
+	/*
+	 * The token selects the local callback, while the path verifies that the
+	 * caller names the same registration that XS_UNWATCH removes.
+	 */
+	XENLIB_OSAL_DLIST_FOR_EACH_CONTAINER(&xs_cli.watches, iter, node) {
+		if (strcmp(iter->token, token) == 0 && strcmp(iter->path, path) == 0) {
+			watch = iter;
+			break;
+		}
+	}
+	if (!watch) {
+		(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+		end_watch_operation(&xs_cli);
+		return -ENOENT;
+	}
+	if (watch->unregistering) {
+		(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+		end_watch_operation(&xs_cli);
+		return -EBUSY;
+	}
+	xenlib_osal_refcount_get(&watch->ref);
+	watch->unregistering = true;
+	(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+
+	ret = execute_watch_command(XS_UNWATCH, path, token,
+				    xenlib_osal_timepoint_timeout(deadline),
+				    &ambiguous_timeout);
+	if (ret < 0) {
+		if (!ambiguous_timeout) {
+			(void)xenlib_osal_mutex_lock(&xs_cli.watch_mutex,
+						 XENLIB_OSAL_WAIT_FOREVER);
+			watch->unregistering = false;
+			(void)xenlib_osal_mutex_unlock(&xs_cli.watch_mutex);
+		}
+		end_watch_operation(&xs_cli);
+		watch_entry_put(watch);
+		if (ambiguous_timeout) {
+			fail_transport(&xs_cli, -ETIMEDOUT, false);
+		}
+		return ret;
+	}
+
+	wait_for_callback = detach_local_watch(&xs_cli, watch);
+	end_watch_operation(&xs_cli);
+	if (wait_for_callback) {
+		(void)xenlib_osal_semaphore_wait(&watch->callback_idle,
+						 XENLIB_OSAL_WAIT_FOREVER);
+	}
+	watch_entry_put(watch);
+
+	return 0;
 }
