@@ -49,7 +49,7 @@ struct xs_perm_entry {
  * @param wire Destination for the encoded permission character.
  *
  * @retval 0       Encoded successfully.
- * @retval -EINVAL @p wire is NULL.
+ * @retval -EINVAL @p wire is NULL or @p perm is not a defined permission value.
  */
 int xenstore_perm_to_wire(enum xs_perm perm, char *wire);
 

@@ -16,7 +16,7 @@ int xenstore_perm_to_wire(enum xs_perm perm, char *wire)
 		return -EINVAL;
 	}
 
-	switch (perm & XS_PERM_BOTH) {
+	switch (perm) {
 	case XS_PERM_WRITE:
 		*wire = 'w';
 		return 0;
@@ -26,9 +26,11 @@ int xenstore_perm_to_wire(enum xs_perm perm, char *wire)
 	case XS_PERM_BOTH:
 		*wire = 'b';
 		return 0;
-	default:
+	case XS_PERM_NONE:
 		*wire = 'n';
 		return 0;
+	default:
+		return -EINVAL;
 	}
 }
 
@@ -83,7 +85,7 @@ ssize_t xenstore_perm_parse_wire(const char *raw, size_t raw_len, struct xs_perm
 
 		ret = xenstore_perm_from_wire(entry[0], &perm);
 		if (ret < 0) {
-			return ret;
+			return -EPROTO;
 		}
 
 		errno = 0;
