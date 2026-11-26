@@ -13,6 +13,13 @@
  */
 #include <xenlib_osal_platform.h>
 
+#if !defined(XENLIB_OSAL_MEM_CACHE_NC) || \
+	!defined(XENLIB_OSAL_MEM_CACHE_WB) || \
+	!defined(XENLIB_OSAL_MEM_PERM_RO) || \
+	!defined(XENLIB_OSAL_MEM_PERM_RW)
+#error "OSAL does not provide the required physical memory mapping attributes"
+#endif
+
 /**
  * @brief Allocate memory block
  *
@@ -40,6 +47,29 @@ extern void *xenlib_osal_memalloc_aligned(size_t align, size_t msize);
  * @param mblock memory block to de-allocate
  */
 extern void xenlib_osal_memfree(void *mblock);
+
+/**
+ * @brief Map a physical memory range into the caller's address space.
+ *
+ * @param[out] vaddr Address that receives the mapped virtual address.
+ * @param paddr Physical address of the range to map.
+ * @param size Size of the range in bytes.
+ * @param flags Bitwise OR of one cache attribute
+ * (XENLIB_OSAL_MEM_CACHE_NC or XENLIB_OSAL_MEM_CACHE_WB) and one access
+ * attribute (XENLIB_OSAL_MEM_PERM_RO or XENLIB_OSAL_MEM_PERM_RW).
+ *
+ * @return 0 on success, non-zero error code otherwise
+ */
+extern int xenlib_osal_map_phys_memory(void **vaddr, uintptr_t paddr,
+				      size_t size, uint32_t flags);
+
+/**
+ * @brief Remove a mapping created by xenlib_osal_map_phys_memory().
+ *
+ * @param vaddr Mapped virtual address.
+ * @param size Size of the mapped range in bytes.
+ */
+extern void xenlib_osal_unmap_phys_memory(void *vaddr, size_t size);
 
 /**
  * @brief Flush and invalidate data cache range

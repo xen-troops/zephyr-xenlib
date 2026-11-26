@@ -2454,3 +2454,29 @@ int xs_mkdir_timeout(const char *path, uint32_t tx_id,
 
 	return ret;
 }
+
+/*
+ * Temporary stubs until the common client gains direct control-domain store
+ * access.
+ */
+int xs_watch_timeout(const char *path, const char *token, xs_watch_cb cb,
+		     void *param, xenlib_osal_timeout_t tout)
+{
+	ARG_UNUSED(path);
+	ARG_UNUSED(token);
+	ARG_UNUSED(cb);
+	ARG_UNUSED(param);
+	ARG_UNUSED(tout);
+
+	return -ENOTSUP;
+}
+
+int xs_unwatch_timeout(const char *path, const char *token,
+		       xenlib_osal_timeout_t tout)
+{
+	ARG_UNUSED(path);
+	ARG_UNUSED(token);
+	ARG_UNUSED(tout);
+
+	return -ENOTSUP;
+}

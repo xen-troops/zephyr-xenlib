@@ -15,8 +15,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <xen/public/io/xs_wire.h>
-
-#include <xen/events.h>
+#include <xen/public/xen.h>
+#include <xenlib_osal_compiler.h>
 
 /**
  * @brief Xenstore entry access permissions.
@@ -49,7 +49,7 @@ struct xs_perm_entry {
  * @param wire Destination for the encoded permission character.
  *
  * @retval 0       Encoded successfully.
- * @retval -EINVAL @p wire is NULL.
+ * @retval -EINVAL @p wire is NULL or @p perm is not a defined permission value.
  */
 int xenstore_perm_to_wire(enum xs_perm perm, char *wire);
 
@@ -88,7 +88,8 @@ ssize_t xenstore_perm_parse_wire(const char *raw, size_t raw_len, struct xs_perm
  * @retval true  Path is non-NULL and begins with '/'.
  * @retval false Path is NULL or relative.
  */
-__maybe_unused static inline bool xenstore_is_abs_path(const char *path)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline bool xenstore_is_abs_path(const char *path)
 {
 	if (!path) {
 		return false;
@@ -104,7 +105,8 @@ __maybe_unused static inline bool xenstore_is_abs_path(const char *path)
  * @retval true  Path equals "/".
  * @retval false Path is NULL, relative, or longer than "/".
  */
-__maybe_unused static inline bool xenstore_is_root_path(const char *path)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline bool xenstore_is_root_path(const char *path)
 {
 	return (xenstore_is_abs_path(path) && (strlen(path) == 1));
 }
@@ -116,7 +118,8 @@ __maybe_unused static inline bool xenstore_is_root_path(const char *path)
  * @retval > 0 Length including the trailing NUL when @p str is non-NULL.
  * @retval 0   When @p str is NULL.
  */
-__maybe_unused static inline size_t xenstore_str_byte_size(const char *str)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline size_t xenstore_str_byte_size(const char *str)
 {
 	if (!str) {
 		return 0;
@@ -133,8 +136,9 @@ __maybe_unused static inline size_t xenstore_str_byte_size(const char *str)
  * @retval false Indexes are within bounds.
  * @retval true  Indexes points invalid position.
  */
-__maybe_unused static inline bool xenstore_check_indexes(XENSTORE_RING_IDX cons,
-							 XENSTORE_RING_IDX prod)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline bool xenstore_check_indexes(XENSTORE_RING_IDX cons,
+					  XENSTORE_RING_IDX prod)
 {
 	return ((prod - cons) > XENSTORE_RING_SIZE);
 }
@@ -148,8 +152,10 @@ __maybe_unused static inline bool xenstore_check_indexes(XENSTORE_RING_IDX cons,
  *
  * @return Offset chunk starts.
  */
-__maybe_unused static inline size_t xenstore_get_input_offset(XENSTORE_RING_IDX cons,
-							      XENSTORE_RING_IDX prod, size_t *len)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline size_t xenstore_get_input_offset(XENSTORE_RING_IDX cons,
+					      XENSTORE_RING_IDX prod,
+					      size_t *len)
 {
 	size_t delta = prod - cons;
 	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(cons);
@@ -170,8 +176,9 @@ __maybe_unused static inline size_t xenstore_get_input_offset(XENSTORE_RING_IDX 
  *
  * @return Offset chunk starts.
  */
-__maybe_unused static inline size_t get_output_offset(XENSTORE_RING_IDX cons,
-						      XENSTORE_RING_IDX prod, size_t *len)
+XENLIB_OSAL_MAYBE_UNUSED
+static inline size_t get_output_offset(XENSTORE_RING_IDX cons,
+				       XENSTORE_RING_IDX prod, size_t *len)
 {
 	size_t free_space = XENSTORE_RING_SIZE - (prod - cons);
 

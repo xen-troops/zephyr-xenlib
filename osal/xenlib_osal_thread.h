@@ -67,6 +67,13 @@ extern int xenlib_osal_thread_name_set(xenlib_osal_tid_t thread,
 									   const char *name);
 
 /**
+ * @brief Get the ID of the calling thread.
+ *
+ * @return Current thread ID.
+ */
+extern xenlib_osal_tid_t xenlib_osal_thread_current(void);
+
+/**
  * @brief Sleep until the target thread exit
  *
  * Using other values, or sizeof(stack) may produce undefined behavior.
@@ -79,5 +86,10 @@ extern int xenlib_osal_thread_name_set(xenlib_osal_tid_t thread,
  */
 extern int xenlib_osal_thread_join(xenlib_osal_thread_t *thread,
 								   xenlib_osal_timeout_t timeout);
+
+/**
+ * @brief Yield execution to another ready thread of equal or higher priority.
+ */
+extern void xenlib_osal_thread_yield(void);
 
 #endif /* XENLIB_OSAL_THREAD_H */
